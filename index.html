@@ -116,6 +116,14 @@ button{touch-action:manipulation;cursor:pointer}
 #menu .mi{display:flex;width:100%;height:56px;align-items:center;gap:12px;border:0;background:none;font-size:17px;padding:0 8px;border-radius:12px}
 #menu .mi:active{background:#f1efea}
 #menu .mi svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#bSave{position:relative}
+#saveDot{position:absolute;top:10px;right:10px;width:9px;height:9px;border-radius:50%;background:#c25e00;display:none}
+#bSave.dirty #saveDot{display:block}
+.lrow{display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid var(--line)}
+.lrow .nm{flex:1;min-width:0}
+.lrow .nm b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lrow .nm span{font-size:12px;color:var(--muted)}
+.lrow.cur{background:var(--accent-weak);border-radius:10px}
 #furnGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px}
 #furnGrid button{border:1px solid var(--line);border-radius:14px;background:#fff;padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:14px;min-height:108px}
 #furnGrid button:active{background:var(--accent-weak)}
@@ -138,6 +146,7 @@ button{touch-action:manipulation;cursor:pointer}
 <div id="app">
   <header id="topbar">
     <button class="ib" id="bMenu" aria-label="תפריט"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <button class="ib" id="bSave" aria-label="שמור"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/></svg><span id="saveDot"></span></button>
     <div id="title"><button id="projName" title="שינוי שם"></button><select id="floorSel" aria-label="קומה" hidden></select></div>
     <button class="ib" id="bFit" aria-label="התאם למסך"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     <button class="ib" id="bRedo" aria-label="שחזור"><svg viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5"/><path d="M4 12h10a6 6 0 0 1 0 12h-2" transform="translate(0 -6)"/></svg></button>
@@ -170,6 +179,7 @@ button{touch-action:manipulation;cursor:pointer}
 </div>
 
 <div class="dlg" id="menu"><div class="box">
+  <button class="mi" data-act="lib"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg>התוכניות שלי</button>
   <button class="mi" data-act="import"><svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 19h16"/></svg>ייבוא JSON</button>
   <button class="mi" data-act="export"><svg viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M4 19h16"/></svg>ייצוא JSON</button>
   <button class="mi" data-act="png"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>ייצוא PNG</button>
@@ -203,6 +213,18 @@ button{touch-action:manipulation;cursor:pointer}
   </div>
 </div></div>
 
+<div class="dlg" id="dLib"><div class="box">
+  <h2>התוכניות שלי</h2>
+  <div id="libList"></div>
+  <div class="hint">נשמר במכשיר הזה בלבד. לגיבוי או להעברה למכשיר אחר: "שמור כקובץ".</div>
+  <div class="acts">
+    <button class="btn primary" id="libSave">שמור</button>
+    <button class="btn" id="libSaveAs">שמור עותק בשם…</button>
+    <button class="btn" id="libFile">שמור כקובץ</button>
+    <button class="btn" data-close>סגור</button>
+  </div>
+</div></div>
+
 <div class="dlg" id="dFurn"><div class="box">
   <h2>ריהוט</h2>
   <div class="hint">בחר פריט ואז הקש על התוכנית במקום שבו הוא יוצב</div>
@@ -232,16 +254,29 @@ const WALL_TYPES=[
 ].map(a=>({name:a[0],core:a[1],total:a[2],he:a[3]}));
 const DEFAULT_WALL='C 20 + P';
 // Office door / window families (guidebook doors + windows sections). The Revit type is "width/height" in cm; draw = the OpenPlan3D graphic.
+// sizes = the standard types "width/height" (guidebook minimums per space + the window schedule); the first is the default
 const DOOR_FAMS=[
-  ['W','דלת עץ',80,210,'single'],['W + O','דלת עץ עם צוהר',80,210,'single'],['E','כניסה לדירה',95,210,'single'],
-  ['mmd','דלת ממ"ד',80,200,'single'],['S','דלת פלדה',90,210,'single'],['F','דלת אש',120,210,'double'],['F2X','דלת אש כפולה',170,210,'double'],
-  ['A','אלומיניום',95,210,'single'],['CW','קיר מסך',120,210,'double'],['L1','רפפות',120,210,'double'],['L2','רפפות',160,210,'double'],['sys','מערכות',80,210,'single']
-].map(a=>({fam:a[0],he:a[1],w:a[2],h:a[3],draw:a[4]}));
+  ['W','דלת עץ',['80/210','70/210'],'single'],['W + O','דלת עץ עם צוהר',['80/210','70/210'],'single'],['E','כניסה לדירה',['95/210'],'single'],
+  ['mmd','דלת ממ"ד',['80/200','70/200'],'single'],['S','דלת פלדה',['90/210'],'single'],['F','דלת אש',['120/210'],'double'],['F2X','דלת אש כפולה',['170/210'],'double'],
+  ['A','אלומיניום',['95/210','100/210'],'single'],['CW','קיר מסך',['120/210'],'double'],['L1','רפפות',['120/210'],'double'],['L2','רפפות',['160/210','170/210'],'double'],
+  ['sys','מערכות',['80/210'],'single']
+].map(a=>({fam:a[0],he:a[1],sizes:a[2],draw:a[3]}));
 const WIN_FAMS=[
-  ['2 W + T','2 כנפות + תריס',140,125,90,'sliding'],['3 W + T','3 כנפות + תריס (ויטרינה)',300,210,0,'sliding'],['2 W','2 כנפות',160,125,90,'sliding'],
-  ['1 W','כנף אחת',80,125,90,'sliding'],['K','קיפ',60,105,125,'casement'],['W_mmd','חלון ממ"ד',100,100,90,'sliding'],['SR','שחרור עשן',100,100,90,'fixed'],
-  ['2W + T + L','2 כנפות + תריס + רפפה',150,125,90,'sliding'],['1W + T + L','כנף + תריס + רפפה',50,125,90,'sliding']
-].map(a=>({fam:a[0],he:a[1],w:a[2],h:a[3],sill:a[4],draw:a[5]}));
+  ['2 W + T','2 כנפות + תריס',['140/125','120/105','180/210','180/230','230/230'],90,'sliding'],
+  ['3 W + T','3 כנפות + תריס (ויטרינה)',['300/210','280/210','280/230','300/230','315/210'],0,'sliding'],
+  ['2 W','2 כנפות',['160/125','120/125','180/125'],90,'sliding'],['1 W','כנף אחת',['80/125'],90,'sliding'],['K','קיפ',['60/105'],125,'casement'],
+  ['W_mmd','חלון ממ"ד',['100/100'],90,'sliding'],['SR','שחרור עשן',['100/100'],90,'fixed'],
+  ['2W + T + L','2 כנפות + תריס + רפפה',['150/125'],90,'sliding'],['1W + T + L','כנף + תריס + רפפה',['50/125'],90,'sliding']
+].map(a=>({fam:a[0],he:a[1],sizes:a[2],sill:a[3],draw:a[4]}));
+const parseSize=s=>{const [w,h]=String(s).split('/').map(Number);return{w,h}};
+const famsOf=kind=>kind==='door'?DOOR_FAMS:WIN_FAMS;
+// write family + type onto an opening; the edge nearest the wall start stays where it was
+function setOpenType(kind,o,fm,size,w){const z=parseSize(size),edge=w?opDist(o,w):null;
+  o.revitFamily=fm.fam;o.type=fm.draw;o.width=z.w;o.height=z.h;if(kind==='window'&&fm.sill!=null)o.sillHeight=fm.sill;
+  if(w)setOpDist(o,w,edge);syncOpenType(kind,o)}
+// what the door / window tool places next: the last family + type picked
+function curOpenType(kind){const s=kind==='door'?'door':'win',fs=famsOf(kind),fm=fs.find(f=>f.fam===settings[s+'Fam'])||fs[0];
+  return {fm,size:fm.sizes.includes(settings[s+'Size'])?settings[s+'Size']:fm.sizes[0]}}
 const famOf=(kind,o)=>(kind==='door'?DOOR_FAMS:WIN_FAMS).find(f=>f.fam===o.revitFamily)||null;
 const revitTypeName=o=>fmt(o.width)+'/'+fmt(o.height);
 // keep the Revit type name in step with the size, only on an office family
@@ -287,9 +322,11 @@ const wallTypeOf=w=>w&&w.wallType?WALL_TYPES.find(t=>t.name===w.wallType)||null:
 // a type name from a project model that is not in the template ("B 7", "C 45 + P"): its core is the number after the letter
 const nameCore=n=>{const m=/^[A-Za-z]+\s*(\d+(?:\.\d+)?)/.exec(String(n||''));return m?+m[1]:0};
 // family selector; a non-office family read from a model stays as it is
-function openTypeField(k,el){const fams=k==='door'?DOOR_FAMS:WIN_FAMS,opts=fams.map(f=>[f.fam,f.fam+' · '+f.he]);
-  if(!famOf(k,el))opts.unshift(['',el.revitFamily?el.revitFamily:'— בחר סוג —']);
-  return F.sel('סוג (משפחה)','fam',opts,famOf(k,el)?el.revitFamily:'')+(famOf(k,el)?F.info('טייפ',esc(revitTypeName(el))):'')}
+function openTypeField(k,el){const fm=famOf(k,el),opts=famsOf(k).map(f=>[f.fam,f.fam+' · '+f.he]);
+  if(!fm)opts.unshift(['',el.revitFamily?el.revitFamily:'— בחר סוג —']);
+  let h=F.sel('סוג (משפחה)','fam',opts,fm?el.revitFamily:'');
+  if(fm){const cur=revitTypeName(el),sz=fm.sizes.map(s=>[s,s]);if(!fm.sizes.includes(cur))sz.push([cur,cur+' (מותאם)']);h+=F.sel('טייפ (רוחב/גובה)','size',sz,cur)}
+  return h}
 
 /* ============ state ============ */
 const $=s=>document.querySelector(s);
@@ -542,32 +579,47 @@ function restoreGeom(g){
   for(const e of g.polys)e.pts.forEach((v,i)=>{if(e.p.points[i])setPt(e.p.points[i],v)});
 }
 function setEnd(e,k,p){setPt(k==='s'?e.w.start:e.w.end,{x:r2(p.x),y:r2(p.y)})}
-// move every wall end that sits on q (original coords) to np
-function movePoint(g,q,np){for(const e of g.walls){if(near(e.s,q,0.5))setEnd(e,'s',np);if(near(e.e,q,0.5))setEnd(e,'e',np)}}
-// wall ends that sit on the interior of wall e (T-junctions) follow e by d
-function followT(g,e,d,skip){
-  for(const f of g.walls){if(f===e||(skip&&skip.has(f)))continue;
-    for(const k of ['s','e']){const o=f[k];if(near(o,e.s,1)||near(o,e.e,1))continue;
-      const q=closestOnSeg(o,e.s,e.e);if(dist(q,o)<=1&&q.t>0&&q.t<1)setEnd(f,k,add(o,d))}}
+// A junction is what the plan draws as one: an end within half the core (+1 cm) of another wall counts as joined,
+// the same test isConnected uses, so a corner that looks joined always moves as joined.
+const jt=w=>coreT(w)/2+1;
+// every wall end (other than skip's) within tol of q, original coords
+function endsNear(g,q,tol,skip){const out=[];for(const e of g.walls){if(e===skip)continue;for(const k of ['s','e'])if(dist(e[k],q)<=tol)out.push([e,k])}return out}
+// move all the ends of a junction by d (each keeps its own small offset from the junction point)
+function moveJunction(g,q,tol,d,skip){for(const [e,k] of endsNear(g,q,tol,skip))setEnd(e,k,add(e[k],d))}
+// T-junctions, after any edit: an end that sat on the body of a wall that moved stays on it, at the same offset.
+// Kept from the wall's fixed end when only one end moved, proportional when both did. Repeats so a chain of walls follows.
+function attachT(g){
+  for(let pass=0;pass<6;pass++){let changed=false;
+    for(const e of g.walls){const w=e.w,sM=!near(e.s,w.start,1e-9),eM=!near(e.e,w.end,1e-9);if(!sM&&!eM)continue;
+      const L0=dist(e.s,e.e),L1=dist(w.start,w.end);if(L0<1e-6||L1<1e-6)continue;
+      const u0={x:(e.e.x-e.s.x)/L0,y:(e.e.y-e.s.y)/L0},u1={x:(w.end.x-w.start.x)/L1,y:(w.end.y-w.start.y)/L1},tol=jt(w);
+      for(const f of g.walls){if(f===e)continue;
+        for(const k of ['s','e']){const o=f[k],cur=k==='s'?f.w.start:f.w.end;if(!near(o,cur,1e-9))continue;
+          if(dist(o,e.s)<=tol||dist(o,e.e)<=tol)continue;
+          const q=closestOnSeg(o,e.s,e.e);if(q.t<=0||q.t>=1||dist(q,o)>tol)continue;
+          const rx=o.x-e.s.x,ry=o.y-e.s.y,a=rx*u0.x+ry*u0.y,off=-rx*u0.y+ry*u0.x;
+          const a1=sM&&!eM?L1-(L0-a):!sM&&eM?a:a*L1/L0;
+          setEnd(f,k,{x:w.start.x+u1.x*a1-u1.y*off,y:w.start.y+u1.y*a1+u1.x*off});changed=true}}}
+    if(!changed)break}
 }
 // Stretch: move point q by d. Walls parallel to d stretch; other walls translate and pass d on to their far end.
 function stretch(g,seeds){
   const visited=[],queue=seeds.slice(),translated=new Set();
   while(queue.length){
-    const {q,d}=queue.shift();if(visited.some(v=>near(v,q,0.5)))continue;visited.push(q);
+    const {q,d,tol}=queue.shift();if(visited.some(v=>dist(v,q)<=tol))continue;visited.push(q);
     const dl=Math.hypot(d.x,d.y);if(dl<1e-9)continue;
-    for(const e of g.walls)for(const k of ['s','e']){
-      const o=e[k];if(!near(o,q,0.5))continue;
-      const other=k==='s'?e.e:e.s,v={x:other.x-o.x,y:other.y-o.y},vl=Math.hypot(v.x,v.y)||1;
+    for(const [e,k] of endsNear(g,q,tol)){
+      const o=e[k],other=k==='s'?e.e:e.s,v={x:other.x-o.x,y:other.y-o.y},vl=Math.hypot(v.x,v.y)||1;
       if(Math.abs(cross(v,d))/(vl*dl)<0.02||translated.has(e)){setEnd(e,k,add(o,d));continue}
       translated.add(e);setEnd(e,k,add(o,d));setEnd(e,k==='s'?'e':'s',add(other,d));
-      followT(g,e,d);queue.push({q:other,d});
+      queue.push({q:other,d,tol:jt(e.w)});
     }
   }
 }
 // Openings on the edited (primary) wall keep their distance from the wall start.
 // A neighbour stretched only at its start keeps its openings where they are (distance from its end).
 function reflow(g,primary){
+  if(settings.joinWalls)attachT(g);
   for(const e of g.walls){const w=e.w;
     const sMoved=!near(e.s,w.start,1e-9),eMoved=!near(e.e,w.end,1e-9);if(!sMoved&&!eMoved)continue;
     const L0=dist(e.s,e.e),L1=dist(w.start,w.end),fromEnd=sMoved&&!eMoved&&!(primary&&primary.has(w));
@@ -580,7 +632,7 @@ function reflow(g,primary){
 // settings.joinWalls off = "disconnected": only the wall itself moves, its neighbours stay put
 function translateWall(g,ge,d){
   if(!settings.joinWalls){setEnd(ge,'s',add(ge.s,d));setEnd(ge,'e',add(ge.e,d))}
-  else{movePoint(g,ge.s,add(ge.s,d));movePoint(g,ge.e,add(ge.e,d));followT(g,ge,d)}
+  else{const t=jt(ge.w),s0={...ge.s},e0={...ge.e};moveJunction(g,s0,t,d);moveJunction(g,e0,t,d)}
   reflow(g,new Set([ge.w]))}
 function setWallLength(w,L,fixed){
   const g=beginGeom(),e=g.walls.find(x=>x.w===w),G=wg(w),dL=L-G.L;if(Math.abs(dL)<1e-9)return;
@@ -590,9 +642,10 @@ function setWallLength(w,L,fixed){
     else if(fixed==='center'){setEnd(e,'e',add(e.e,d(.5)));setEnd(e,'s',add(e.s,d(-.5)))}
     else setEnd(e,'e',add(e.e,d(1)));
   }
-  else if(fixed==='end')stretch(g,[{q:e.s,d:d(-1)}]);
-  else if(fixed==='center')stretch(g,[{q:e.e,d:d(.5)},{q:e.s,d:d(-.5)}]);
-  else stretch(g,[{q:e.e,d:d(1)}]);
+  else{const t=jt(w);
+    if(fixed==='end')stretch(g,[{q:e.s,d:d(-1),tol:t}]);
+    else if(fixed==='center')stretch(g,[{q:e.e,d:d(.5),tol:t},{q:e.s,d:d(-.5),tol:t}]);
+    else stretch(g,[{q:e.e,d:d(1),tol:t}])}
   reflow(g,new Set([w]));
 }
 const opDist=(o,w)=>o.position*wg(w).L-(o.width||0)/2;  // wall start -> near edge of the opening
@@ -744,8 +797,9 @@ function draw(c,V,W,H,DPR,print){
       c.moveTo(A.x+hx,A.y+hy);c.lineTo(B.x+hx,B.y+hy);c.lineTo(B.x-hx,B.y-hy);c.lineTo(A.x-hx,A.y-hy);c.closePath()}
   };
   // a low wall (under LOW_WALL cm) is cut below the plan's cut plane: outline only, no poché
-  c.beginPath();for(const w of ws)if(!isLow(w))wallPath(w);c.fillStyle='#2b2b2b';c.fill();
+  // low walls first, so where they meet a full wall the full wall's poché covers them
   c.beginPath();for(const w of ws)if(isLow(w))wallPath(w);c.fillStyle='#fff';c.fill();c.lineWidth=1.3/S;c.strokeStyle='#2b2b2b';c.stroke();
+  c.beginPath();for(const w of ws)if(!isLow(w))wallPath(w);c.fillStyle='#2b2b2b';c.fill();
   if(!print&&sel&&sel.kind==='wall'){const w=getSel();if(w){c.beginPath();wallPath(w);
     if(isLow(w)){c.fillStyle='rgba(21,101,192,.15)';c.fill();c.lineWidth=2.2/S;c.strokeStyle='#1565c0';c.stroke()}else{c.fillStyle='#1565c0';c.fill()}}}
   // openings
@@ -785,7 +839,11 @@ function draw(c,V,W,H,DPR,print){
       for(let i=0;i<pts.length-1;i++){const a=pts[i],bb=pts[i+1];if(bb-a<0.5)continue;
         const A=sp({x:s.start.x+G.ux*a,y:s.start.y+G.uy*a}),B=sp({x:s.start.x+G.ux*bb,y:s.start.y+G.uy*bb});
         dimLine(c,A,B,off,fmt(bb-a),'#1565c0',n)}}
-    const P=sp(s.start);c.font='600 11px -apple-system,Arial';c.fillStyle='#1565c0';c.textAlign='center';c.textBaseline='middle';c.fillText('התחלה',P.x,P.y-22);
+    // name both ends, and pin the point that stays put when the length is typed
+    c.font='600 11px -apple-system,Arial';c.fillStyle='#1565c0';c.textAlign='center';c.textBaseline='middle';
+    const P0=sp(s.start),P1=sp(s.end),PC={x:(P0.x+P1.x)/2,y:(P0.y+P1.y)/2};c.fillText('התחלה',P0.x,P0.y-22);c.fillText('סוף',P1.x,P1.y-22);
+    const pin=settings.fixedEnd==='end'?P1:settings.fixedEnd==='center'?PC:P0;
+    c.fillStyle='#c25e00';c.beginPath();c.moveTo(pin.x,pin.y-6);c.lineTo(pin.x-7,pin.y-17);c.lineTo(pin.x+7,pin.y-17);c.closePath();c.fill();
   }
   if(s&&sel.kind==='line'){const L=dist(s.start,s.end);if(L*S>30){const A=sp(s.start),B=sp(s.end);const G=wg({start:s.start,end:s.end});
     label(c,{x:(A.x+B.x)/2-G.nx*16,y:(A.y+B.y)/2-G.ny*16},Math.atan2(G.uy,G.ux),fmt(L),'#1565c0',13)}}
@@ -1088,9 +1146,10 @@ function singleMove(e){
 function dragHandle(g,h,wp){
   const el=h.el;
   if(h.owner==='wall'){const ge=g.geom.walls.find(x=>x.w===el),k=h.key==='start'?'s':'e',o=ge[k],other=ge[k==='s'?'e':'s'];
-    const sharing=settings.joinWalls?new Set(g.geom.walls.filter(x=>near(x.s,o,0.5)||near(x.e,o,0.5)).map(x=>x.w)):new Set([el]);
-    const s=snap(wp,other,{touch:g.touch,exclude:o,excludeWalls:sharing});
-    if(settings.joinWalls)movePoint(g.geom,o,s.p);else setEnd(ge,k,s.p);reflow(g.geom,new Set([el]));setHud('אורך: '+fmt(wg(el).L)+' ס"מ')}
+    const tol=jt(el),jn=settings.joinWalls?endsNear(g.geom,o,tol,ge):[];
+    const sharing=new Set([el,...jn.map(([x])=>x.w)]);
+    const s=snap(wp,other,{touch:g.touch,exclude:o,excludeWalls:sharing}),d={x:s.p.x-o.x,y:s.p.y-o.y};
+    setEnd(ge,k,s.p);for(const [x,kk] of jn)setEnd(x,kk,add(x[kk],d));reflow(g.geom,new Set([el]));setHud('אורך: '+fmt(wg(el).L)+' ס"מ')}
   else if(h.owner==='line'){const ge=g.geom.lines.find(x=>x.l===el),o=h.key==='start'?ge.s:ge.e,other=h.key==='start'?ge.e:ge.s;
     const s=snap(wp,other,{touch:g.touch,markup:true,exclude:o});setPt(h.key==='start'?el.start:el.end,s.p);setHud('אורך: '+fmt(dist(el.start,el.end))+' ס"מ')}
   else if(h.owner==='polygon'){const ge=g.geom.polys.find(x=>x.p===el),n=ge.pts.length,o=ge.pts[h.key],prev=ge.pts[(h.key-1+n)%n];
@@ -1166,11 +1225,12 @@ function finishArea(){
 }
 function endChain(){if(tool==='area'&&chain&&chain.points.length>=3){finishArea();return}chain=null;preview=null;setHud('');render();updateToolOpts()}
 function addOpening(kind,w,along){
-  const G=wg(w),fm=kind==='door'?DOOR_FAMS[0]:WIN_FAMS[0],width=fm.w;let edge=along-width/2;if(settings.round5)edge=Math.round(edge/5)*5;
+  const G=wg(w),cur=curOpenType(kind),width=parseSize(cur.size).w;let edge=along-width/2;if(settings.round5)edge=Math.round(edge/5)*5;
   let id;commit(()=>{
-    const o=kind==='door'?{id:newId('d-'),wallId:w.id,position:0.5,width,height:fm.h,type:fm.draw,swingDirection:'left',flipSide:false,revitFamily:fm.fam}
-      :{id:newId('win-'),wallId:w.id,position:0.5,width,height:fm.h,sillHeight:fm.sill,type:fm.draw,revitFamily:fm.fam};
-    if(G.L<width)o.width=Math.max(10,Math.floor(G.L*0.8));syncOpenType(kind,o);setOpDist(o,w,edge);id=o.id;ensureArr(kind==='door'?'doors':'windows').push(o)});
+    const o=kind==='door'?{id:newId('d-'),wallId:w.id,position:0.5,width:0,height:0,type:'single',swingDirection:'left',flipSide:false}
+      :{id:newId('win-'),wallId:w.id,position:0.5,width:0,height:0,sillHeight:90,type:'sliding'};
+    setOpenType(kind,o,cur.fm,cur.size,null);
+    if(G.L<o.width){o.width=Math.max(10,Math.floor(G.L*0.8));syncOpenType(kind,o)}setOpDist(o,w,edge);id=o.id;ensureArr(kind==='door'?'doors':'windows').push(o)});
   sel={kind,id};setTool('select');refreshPanel();render();ensureVisible();
 }
 
@@ -1192,14 +1252,18 @@ function setTool(t){
   if(t!=='select'&&t!=='furniture'){sel=null;refreshPanel()}
   updateToolOpts();setHud('');render();
   if(t==='furniture'&&!pendingFurn)openDlg('dFurn');
-  if(t==='door')toast('הקש על קיר להוספת דלת');if(t==='window')toast('הקש על קיר להוספת חלון');
 }
 const swatches=(cur,attr)=>COLORS.map(c=>'<button class="sw'+(c===cur?' on':'')+'" style="background:'+c+'" '+attr+'="'+c+'" aria-label="צבע"></button>').join('');
 function updateToolOpts(){
   const box=$('#toolopts');
-  if(!DRAW_TOOLS.has(tool)){box.classList.remove('show');box.innerHTML='';return}
+  const opTool=tool==='door'||tool==='window';
+  if(!DRAW_TOOLS.has(tool)&&!opTool){box.classList.remove('show');box.innerHTML='';return}
   let h='';
-  if(tool==='wall'){
+  if(opTool){const cur=curOpenType(tool);
+    h='<span class="chip">סוג <select id="ooFam">'+famsOf(tool).map(f=>'<option value="'+esc(f.fam)+'"'+(f===cur.fm?' selected':'')+'>'+esc(f.fam+' · '+f.he)+'</option>').join('')+'</select></span>'+
+      '<span class="chip">טייפ <select id="ooSize">'+cur.fm.sizes.map(s=>'<option'+(s===cur.size?' selected':'')+'>'+s+'</option>').join('')+'</select></span>'+
+      '<span class="chip">הקש על קיר להוספה</span>';
+  }else if(tool==='wall'){
     const types=WALL_TYPES.map(w=>'<option value="'+esc(w.name)+'"'+(w.name===settings.wallType?' selected':'')+'>'+esc(w.name)+' · '+esc(w.he)+'</option>').join('');
     h='<span class="chip">סוג <select id="woType">'+types+'</select></span>'+
       '<span class="chip">ליבה '+fmt(wallTypeOf({wallType:settings.wallType}).core)+' ס"מ</span>'+
@@ -1217,6 +1281,9 @@ function updateToolOpts(){
   box.innerHTML=h;box.classList.add('show');
   const on=(id,ev,fn)=>{const e=$('#'+id);if(e)e['on'+ev]=fn};
   on('woType','change',e=>{settings.wallType=e.target.value;saveNow();updateToolOpts();render()});
+  const os=tool==='door'?'door':'win';
+  on('ooFam','change',e=>{settings[os+'Fam']=e.target.value;settings[os+'Size']=null;saveNow();updateToolOpts()});
+  on('ooSize','change',e=>{settings[os+'Size']=e.target.value;saveNow()});
   on('woH','change',e=>{const v=parseNum(e.target.value);if(v>0){settings.wallHeight=v;saveNow()}else e.target.value=settings.wallHeight});
   on('woEnd','click',endChain);
   on('woCancel','click',()=>{chain=null;preview=null;updateToolOpts();render()});
@@ -1249,7 +1316,7 @@ function refreshPanel(){
     '<button class="ib" data-a="close" aria-label="סגור"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
   let fl='',ac='',hint='';
   if(k==='wall'){const G=wg(el);
-    fl+=F.num('אורך','len',fmt(G.L))+F.seg('קצה קבוע','fixed',[['start','התחלה'],['center','אמצע'],['end','סוף']],settings.fixedEnd)+
+    fl+=F.num('אורך','len',fmt(G.L))+F.seg('שינוי אורך: מה נשאר במקום','fixed',[['start','התחלה'],['center','אמצע'],['end','סוף']],settings.fixedEnd)+
       F.num('גובה','height',wallH(el));
     // office types only; a name read from a model that is not in the template is shown, never offered for new walls
     const types=WALL_TYPES.map(w=>[w.name,w.name+' · '+w.he]);if(!wallTypeOf(el))types.unshift(['',el.wallType||'— בחר סוג —']);
@@ -1325,8 +1392,10 @@ function applyField(k,raw){
   const el=getSel();if(!el)return;
   if(k==='wallType'){const t=WALL_TYPES.find(w=>w.name===raw);if(!t){refreshPanel();return}
     commit(()=>{el.wallType=t.name;el.thickness=t.total;reseatOn(el)});return}
-  if(k==='fam'){const fm=(sel.kind==='door'?DOOR_FAMS:WIN_FAMS).find(f=>f.fam===raw),w=wallById(el.wallId);if(!fm||!w){refreshPanel();return}
-    commit(()=>{const edge=opDist(el,w);el.revitFamily=fm.fam;el.type=fm.draw;el.width=fm.w;el.height=fm.h;if(fm.sill!=null)el.sillHeight=fm.sill;setOpDist(el,w,edge);syncOpenType(sel.kind,el)});return}
+  if(k==='fam'||k==='size'){const kind=sel.kind,fm=k==='fam'?famsOf(kind).find(f=>f.fam===raw):famOf(kind,el),w=wallById(el.wallId);if(!fm||!w){refreshPanel();return}
+    // a new family keeps the size when it is one of its types, else takes its default
+    const size=k==='size'?raw:fm.sizes.includes(revitTypeName(el))?revitTypeName(el):fm.sizes[0];
+    commit(()=>{setOpenType(kind,el,fm,size,w);const s=kind==='door'?'door':'win';settings[s+'Fam']=fm.fam;settings[s+'Size']=size;saveNow()});return}
   if(k==='pname'){commit(()=>{if(el.name===raw.trim())return false;el.name=raw.trim()});return}
   const v=parseNum(raw);
   if(!isFinite(v)){refreshPanel();return}
@@ -1356,7 +1425,7 @@ function applyField(k,raw){
   }
 }
 function applySeg(g,v){
-  if(g==='fixed'){settings.fixedEnd=v;saveNow();refreshPanel();return}
+  if(g==='fixed'){settings.fixedEnd=v;saveNow();refreshPanel();render();return}
   if(g==='join'){setJoin(v==='1');return}
   const el=getSel();if(!el)return;
   if(g==='swing')commit(()=>{if((el.swingDirection||'left')===v)return false;el.swingDirection=v});
@@ -1391,12 +1460,33 @@ function closeDlg(id){$('#'+id).classList.remove('show')}
 document.querySelectorAll('.dlg').forEach(d=>{d.addEventListener('click',e=>{if(e.target===d||e.target.hasAttribute('data-close'))d.classList.remove('show')})});
 $('#bMenu').onclick=()=>openDlg('menu');
 $('#menu').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;closeDlg('menu');const a=b.dataset.act;
+  if(a==='lib'){renderLib();openDlg('dLib')}
   if(a==='import'){$('#impErr').textContent='';openDlg('dImport')}
   if(a==='export'){$('#expText').value=exportText();openDlg('dExport')}
   if(a==='png')exportPNG();
   if(a==='rename')rename();
   if(a==='new'){if(confirm('להתחיל תוכנית חדשה? אפשר לבטל עם "ביטול".')){undoStack.push(snapshot());redoStack=[];project=blankProject();curFloorId=null;sel=null;chain=null;saveNow();updateUI();refreshPanel();fit()}}
 });
+/* saved plans: a library on this device, keyed by the project id. The working copy still autosaves on its own. */
+const LS_LIB='planEditor.library.v1';
+function libRead(){try{const a=JSON.parse(localStorage.getItem(LS_LIB)||'[]');return Array.isArray(a)?a:[]}catch(e){return[]}}
+function libWrite(a){try{localStorage.setItem(LS_LIB,JSON.stringify(a));return true}catch(e){toast('אין מקום לשמירה במכשיר. שמור כקובץ');return false}}
+function savePlan(){const a=libRead(),json=JSON.stringify(project),i=a.findIndex(x=>x.id===project.id),row={id:project.id,name:project.name||'ללא שם',savedAt:new Date().toISOString(),json};
+  if(i>=0)a[i]=row;else a.unshift(row);if(libWrite(a)){toast('נשמר: '+row.name);updateUI();renderLib()}}
+function saveAs(){const v=prompt('שם העותק:',(project.name||'תוכנית')+' - עותק');if(v==null||!v.trim())return;
+  undoStack.push(snapshot());redoStack=[];project=JSON.parse(JSON.stringify(project));project.id='plan-'+Math.random().toString(36).slice(2,10);project.name=v.trim();savePlan();saveNow()}
+function openPlan(id){const r=libRead().find(x=>x.id===id);if(!r)return;
+  if(isDirty()&&!confirm('יש שינויים שלא נשמרו בתוכנית הנוכחית. לפתוח בכל זאת? (אפשר לחזור עם "ביטול")'))return;
+  undoStack.push(snapshot());redoStack=[];project=JSON.parse(r.json);curFloorId=null;sel=null;chain=null;saveNow();updateUI();refreshPanel();fit();closeDlg('dLib');toast('נפתח: '+r.name)}
+function deletePlan(id){const a=libRead(),r=a.find(x=>x.id===id);if(!r||!confirm('למחוק את "'+r.name+'" מהרשימה? אי אפשר לשחזר.'))return;libWrite(a.filter(x=>x.id!==id));updateUI();renderLib()}
+function isDirty(){const r=libRead().find(x=>x.id===project.id);return !r||r.json!==JSON.stringify(project)}
+function renderLib(){const a=libRead(),el=$('#libList');
+  el.innerHTML=a.length?a.map(r=>'<div class="lrow'+(r.id===project.id?' cur':'')+'"><div class="nm"><b>'+esc(r.name)+'</b><span>'+esc(new Date(r.savedAt).toLocaleString('he-IL'))+'</span></div>'+
+    '<button class="btn sm" data-open="'+esc(r.id)+'">פתח</button><button class="btn sm danger" data-delp="'+esc(r.id)+'">מחק</button></div>').join(''):'<div class="hint">עוד לא נשמרו תוכניות.</div>';
+  el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openPlan(b.dataset.open));el.querySelectorAll('[data-delp]').forEach(b=>b.onclick=()=>deletePlan(b.dataset.delp))}
+$('#bSave').onclick=savePlan;
+$('#libSave').onclick=savePlan;$('#libSaveAs').onclick=saveAs;
+$('#libFile').onclick=()=>download(new Blob([exportText()],{type:'application/json'}),fileBase()+'.openplan.json');
 function rename(){const v=prompt('שם התוכנית:',project.name||'');if(v!=null&&v.trim())commit(()=>{project.name=v.trim()});updateUI()}
 $('#projName').onclick=rename;
 $('#impGo').onclick=()=>{const r=importText($('#impText').value);if(r.ok){closeDlg('dImport');$('#impText').value='';toast('יובא: '+(project.name||''))}else $('#impErr').textContent=r.errors.slice(0,12).join('\n')};
@@ -1440,7 +1530,7 @@ function buildFurnGrid(){
 function setHud(t){if(t===hudText)return;hudText=t;const h=$('#hud');h.textContent=t;h.classList.toggle('show',!!t)}
 let toastT=null;function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('show'),2200)}
 function updateUI(){
-  $('#bUndo').disabled=!undoStack.length;$('#bRedo').disabled=!redoStack.length;
+  $('#bUndo').disabled=!undoStack.length;$('#bRedo').disabled=!redoStack.length;$('#bSave').classList.toggle('dirty',isDirty());
   $('#projName').textContent=project.name||'ללא שם';
   $('#tJoin').classList.toggle('on',settings.joinWalls);$('#tJoinL').textContent=settings.joinWalls?'מחובר':'מנותק';
   $('#tSnap').classList.toggle('on',settings.snap);$('#tRound').classList.toggle('on',settings.round5);$('#tFinger').classList.toggle('on',settings.fingerDraws);
@@ -1459,6 +1549,7 @@ document.addEventListener('keydown',e=>{
   const m=e.ctrlKey||e.metaKey;
   if(m&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo()}
   else if(m&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}
+  else if(m&&e.key.toLowerCase()==='s'){e.preventDefault();savePlan()}
   else if(e.key==='Escape'){if(chain)endChain();else{sel=null;refreshPanel();render()}}
   else if((e.key==='Delete'||e.key==='Backspace')&&sel){e.preventDefault();panelAction('del')}
   else if(e.key==='Enter'&&chain)endChain();
@@ -1480,6 +1571,8 @@ function boot(){
 window.PlanEditor={
   importText,exportText,getProject:()=>project,
   setWallLength:(id,L,fixed)=>{const w=wallById(id);if(!w)throw new Error('no wall '+id);commit(()=>setWallLength(w,L,fixed||'start'))},
+  moveWall:(id,off)=>{const w=wallById(id);if(!w)throw new Error('no wall '+id);const G=wg(w);
+    commit(()=>{const g=beginGeom();translateWall(g,g.walls.find(x=>x.w===w),{x:G.nx*off,y:G.ny*off})})},
   opDist:id=>{const o=openings().find(x=>x.o.id===id);return o?opDist(o.o,wallById(o.o.wallId)):null},
   select:(kind,id)=>{sel={kind,id};refreshPanel();render()},
   tempDims:()=>{draw(ctx,view,cw,ch,dpr,false);return tempDims.map(t=>({value:t.value,x:t.L.x,y:t.L.y}))},
