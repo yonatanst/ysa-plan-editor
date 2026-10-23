@@ -1174,7 +1174,10 @@ const btn=(a,t,cls)=>'<button class="btn sm'+(cls?' '+cls:'')+'" data-a="'+a+'">
 const dimSeg=()=>F.seg('מידות זמניות','dimmode',[['face','פנים'],['axis','ציר']],settings.dimMode);
 function refreshPanel(){
   const pn=$('#panel');const el=getSel();
-  if(!el){pn.classList.remove('show');pn.innerHTML='';return}
+  if(!el){pn.classList.remove('show');pn.innerHTML='';pn.dataset.for='';return}
+  // rebuilding the panel resets its scroll; keep the position while the same element stays selected
+  const key=sel.kind+':'+sel.id,oldF=pn.querySelector('.fields'),oldA=pn.querySelector('.acts');
+  const keep=pn.dataset.for===key?{f:oldF?oldF.scrollLeft:0,a:oldA?oldA.scrollLeft:0,t:pn.scrollTop}:null;
   const k=sel.kind,ck=k==='furniture'?catKey(el):null;
   let h='<div class="ph"><h3>'+KIND_HE[k]+(ck&&CAT[ck]?' · '+CAT[ck].he:'')+'</h3>'+(el.revitId!=null?'<span class="badge" title="מזהה רוויט">Revit '+esc(el.revitId)+'</span>':'')+
     '<span class="id">'+esc(el.id)+'</span>'+
@@ -1216,7 +1219,8 @@ function refreshPanel(){
     ac=btn('del','מחק','danger');hint='גרור פינה כדי לשנות צורה, או גרור את האזור כדי להזיז.';
   }
   h+='<div class="fields">'+fl+'</div><div class="acts">'+ac+'</div>'+(hint?'<div class="hint">'+hint+'</div>':'');
-  pn.innerHTML=h;pn.classList.add('show');pn.classList.toggle('mini',!!settings.panelMini);
+  pn.innerHTML=h;pn.classList.add('show');pn.classList.toggle('mini',!!settings.panelMini);pn.dataset.for=key;
+  if(keep){pn.querySelector('.fields').scrollLeft=keep.f;pn.querySelector('.acts').scrollLeft=keep.a;pn.scrollTop=keep.t}
   pn.querySelectorAll('input.num,input.txt').forEach(inp=>{
     inp.addEventListener('change',()=>applyField(inp.dataset.k,inp.value));
     inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur()}});
