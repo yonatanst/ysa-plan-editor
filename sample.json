@@ -30,7 +30,7 @@
           "thickness": 25,
           "height": 280,
           "color": "#444444",
-          "wallType": "קיר חוץ 25",
+          "wallType": "C 20 + P",
           "revit": {
             "typeId": 4125,
             "baseConstraint": "Level 1",
@@ -53,7 +53,7 @@
           "thickness": 25,
           "height": 280,
           "color": "#444444",
-          "wallType": "קיר חוץ 25",
+          "wallType": "C 20 + P",
           "revit": {
             "typeId": 4125,
             "baseConstraint": "Level 1",
@@ -76,7 +76,7 @@
           "thickness": 25,
           "height": 280,
           "color": "#444444",
-          "wallType": "קיר חוץ 25",
+          "wallType": "C 20 + P",
           "revit": {
             "typeId": 4125,
             "baseConstraint": "Level 1",
@@ -99,7 +99,7 @@
           "thickness": 25,
           "height": 280,
           "color": "#444444",
-          "wallType": "קיר חוץ 25",
+          "wallType": "C 20 + P",
           "revit": {
             "typeId": 4125,
             "baseConstraint": "Level 1",
@@ -119,10 +119,10 @@
             "x": 520,
             "y": 600
           },
-          "thickness": 12,
+          "thickness": 15,
           "height": 280,
           "color": "#444444",
-          "wallType": "בלוק פנים 12",
+          "wallType": "B 10 + P",
           "revit": {
             "typeId": 4112,
             "baseConstraint": "Level 1",
@@ -142,10 +142,10 @@
             "x": 900,
             "y": 380
           },
-          "thickness": 10,
+          "thickness": 15,
           "height": 280,
           "color": "#444444",
-          "wallType": "בלוק פנים 10",
+          "wallType": "B 10 + P",
           "revit": {
             "typeId": 4110,
             "baseConstraint": "Level 1",
@@ -160,12 +160,13 @@
           "revitId": 400201,
           "wallId": "w-south",
           "position": 0.75,
-          "width": 100,
+          "width": 95,
           "height": 210,
           "type": "single",
           "swingDirection": "left",
           "flipSide": false,
-          "revitFamily": "M_Door-Entry 100x210",
+          "revitFamily": "E",
+          "revitType": "95/210",
           "revitMark": "D1"
         },
         {
@@ -178,7 +179,8 @@
           "type": "single",
           "swingDirection": "right",
           "flipSide": true,
-          "revitFamily": "M_Single-Flush 80x210"
+          "revitFamily": "W",
+          "revitType": "80/210"
         },
         {
           "id": "d-bath",
@@ -202,7 +204,8 @@
           "height": 140,
           "sillHeight": 90,
           "type": "sliding",
-          "revitFamily": "M_Window-Sliding 160x140",
+          "revitFamily": "2 W",
+          "revitType": "160/140",
           "revitMark": "W1"
         },
         {

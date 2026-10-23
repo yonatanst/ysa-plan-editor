@@ -220,11 +220,32 @@ const ARR={wall:'walls',door:'doors',window:'windows',furniture:'furniture',line
 const KIND_HE={wall:'קיר',door:'דלת',window:'חלון',furniture:'ריהוט',line:'קו',polygon:'אזור'};
 const DRAW_TOOLS=new Set(['wall','line','area']);
 const COLORS=['#e53935','#1e88e5','#43a047','#fb8c00','#8e24aa','#fdd835','#212121'];
+// Office wall types, names exactly as in the template YSA_Families_6.7.25 (ספר הדרכה 1.10.23, walls section).
+// core = what the plan draws; total = the Revit type width, written to thickness. "+ P" = 2.5 plaster each side.
 const WALL_TYPES=[
-  {name:'קיר חוץ 20',t:20},{name:'קיר חוץ 25',t:25},{name:'קיר חוץ 30',t:30},
-  {name:'בטון 20',t:20},{name:'בטון 30 (ממ"ד)',t:30},
-  {name:'בלוק פנים 10',t:10},{name:'בלוק פנים 12',t:12},{name:'גבס 10',t:10},{name:'גבס 15',t:15}
-];
+  ['C 20 + P',20,25,'בטון + טיח (חוץ, בין דירות)'],['B 10 + P',10,15,'בלוק + טיח (פנים)'],['B 15 + P',15,20,'בלוק + טיח'],['B 20 + P',20,25,'בלוק + טיח'],
+  ['C 10',10,10,'בטון'],['C 10 + P',10,15,'בטון + טיח'],['C 15',15,15,'בטון'],['C 15 + P',15,20,'בטון + טיח'],['C 20',20,20,'בטון'],
+  ['C 20 + P 5',20,27.5,'בטון + טיח 5'],['C 25',25,25,'בטון'],['C 25 + P',25,30,'בטון + טיח'],['C 30 + P',30,35,'בטון + טיח'],
+  ['C 30 + P 5',30,37.5,'בטון + טיח 5'],['C 40 + P',40,45,'בטון + טיח'],['C 60 + P',60,65,'בטון + טיח'],
+  ['D 40 + 10',40,50,'דיפון + קיר יישור'],['D 50 + 10',50,60,'דיפון + קיר יישור'],['D 50 + 25',50,75,'דיפון + קיר יישור'],
+  ['M 20 + P',20,25,'מעקה'],['P 5',5,5,'פח (פירים)'],['L 5',5,5,'רפפות (מסתור כביסה)'],['H 2.5',2.5,2.5,'חיפוי']
+].map(a=>({name:a[0],core:a[1],total:a[2],he:a[3]}));
+const DEFAULT_WALL='C 20 + P';
+// Office door / window families (guidebook doors + windows sections). The Revit type is "width/height" in cm; draw = the OpenPlan3D graphic.
+const DOOR_FAMS=[
+  ['W','דלת עץ',80,210,'single'],['W + O','דלת עץ עם צוהר',80,210,'single'],['E','כניסה לדירה',95,210,'single'],
+  ['mmd','דלת ממ"ד',80,200,'single'],['S','דלת פלדה',90,210,'single'],['F','דלת אש',120,210,'double'],['F2X','דלת אש כפולה',170,210,'double'],
+  ['A','אלומיניום',95,210,'single'],['CW','קיר מסך',120,210,'double'],['L1','רפפות',120,210,'double'],['L2','רפפות',160,210,'double'],['sys','מערכות',80,210,'single']
+].map(a=>({fam:a[0],he:a[1],w:a[2],h:a[3],draw:a[4]}));
+const WIN_FAMS=[
+  ['2 W + T','2 כנפות + תריס',140,125,90,'sliding'],['3 W + T','3 כנפות + תריס (ויטרינה)',300,210,0,'sliding'],['2 W','2 כנפות',160,125,90,'sliding'],
+  ['1 W','כנף אחת',80,125,90,'sliding'],['K','קיפ',60,105,125,'casement'],['W_mmd','חלון ממ"ד',100,100,90,'sliding'],['SR','שחרור עשן',100,100,90,'fixed'],
+  ['2W + T + L','2 כנפות + תריס + רפפה',150,125,90,'sliding'],['1W + T + L','כנף + תריס + רפפה',50,125,90,'sliding']
+].map(a=>({fam:a[0],he:a[1],w:a[2],h:a[3],sill:a[4],draw:a[5]}));
+const famOf=(kind,o)=>(kind==='door'?DOOR_FAMS:WIN_FAMS).find(f=>f.fam===o.revitFamily)||null;
+const revitTypeName=o=>fmt(o.width)+'/'+fmt(o.height);
+// keep the Revit type name in step with the size, only on an office family
+function syncOpenType(kind,o){if(famOf(kind,o)){const t=revitTypeName(o);if(o.revitType!==t)o.revitType=t}}
 // Render table for every catalog id we may meet (W×D defaults from OpenPlan3D). Back of an object is -y, front +y; bed head at -x.
 // living_block / kitchen_u are written as catalogId "imported_object" + sourceCategory, as the OpenPlan3D spec asks for non-catalog items.
 const CATALOG=[
@@ -242,6 +263,9 @@ const CATALOG=[
 ].map(a=>({id:a[0],he:a[1],w:a[2],d:a[3],sym:a[4]}));
 const CAT=Object.fromEntries(CATALOG.map(c=>[c.id,c]));
 const CUSTOM=new Set(['living_block','kitchen_u']);
+// Yonatan 23/10: every item hangs on a wall like a door, except the dining table and the living room
+const FREE_FURN=new Set(['dining_table','dining_chair','table','living_block','sofa','loveseat','chair','coffee_table','office_chair']);
+const LOW_WALL=180;  // cm: a lower wall is below the cut plane, drawn without poché
 // The palette: what can be placed. extra = keys written on the new element.
 const PALETTE=[
   {key:'living_block',he:'בלוק סלון',w:330,d:300},
@@ -259,16 +283,21 @@ const PALETTE=[
   {key:'washer_dryer',he:'מכונת כביסה',w:60,d:60},
   {key:'fridge',he:'מקרר',w:80,d:70}
 ];
-const DOOR_TYPES=[['single','חד-כנפית'],['double','דו-כנפית'],['french','צרפתית'],['sliding','הזזה'],['pocket','כיס'],['bifold','מתקפלת'],['opening','פתח ללא דלת'],['garage','חניה']];
-const WIN_TYPES=[['standard','רגיל'],['fixed','קבוע'],['casement','ציר'],['sliding','הזזה'],['bay','בולט']];
+const wallTypeOf=w=>w&&w.wallType?WALL_TYPES.find(t=>t.name===w.wallType)||null:null;
+// a type name from a project model that is not in the template ("B 7", "C 45 + P"): its core is the number after the letter
+const nameCore=n=>{const m=/^[A-Za-z]+\s*(\d+(?:\.\d+)?)/.exec(String(n||''));return m?+m[1]:0};
+// family selector; a non-office family read from a model stays as it is
+function openTypeField(k,el){const fams=k==='door'?DOOR_FAMS:WIN_FAMS,opts=fams.map(f=>[f.fam,f.fam+' · '+f.he]);
+  if(!famOf(k,el))opts.unshift(['',el.revitFamily?el.revitFamily:'— בחר סוג —']);
+  return F.sel('סוג (משפחה)','fam',opts,famOf(k,el)?el.revitFamily:'')+(famOf(k,el)?F.info('טייפ',esc(revitTypeName(el))):'')}
 
 /* ============ state ============ */
 const $=s=>document.querySelector(s);
 const cv=$('#cv'), ctx=cv.getContext('2d'), stage=$('#stage');
 let project=null, curFloorId=null;
 let view={s:0.6,ox:40,oy:40};
-let settings={snap:true,round5:true,fingerDraws:true,wallThickness:20,wallHeight:280,wallType:'קיר חוץ 20',fixedEnd:'start',
-  joinWalls:true,dimMode:'face',lineColor:'#e53935',lineWidth:2,areaColor:'#1e88e5',panelMini:false};
+let settings={snap:true,round5:true,fingerDraws:true,wallHeight:280,wallType:DEFAULT_WALL,fixedEnd:'start',
+  joinWalls:true,lineColor:'#e53935',lineWidth:2,areaColor:'#1e88e5',panelMini:false};
 let tool='select', sel=null, pendingFurn=null;
 let chain=null;      // {first, last, points?} while drawing walls / lines / areas
 let preview=null;    // {p, kind, align} snapped preview point
@@ -286,8 +315,12 @@ const cross=(a,b)=>a.x*b.y-a.y*b.x;
 const add=(a,d)=>({x:a.x+d.x,y:a.y+d.y});
 const fmt=v=>{const r=Math.round(v*10)/10;return Math.abs(r-Math.round(r))<1e-9?String(Math.round(r)):r.toFixed(1)};
 const r5=v=>settings.round5?Math.round(v/5)*5:Math.round(v*10)/10;
+// t = the core only (the plan never shows finish layers); thickness in the JSON stays the full wall
 function wg(w){const dx=w.end.x-w.start.x,dy=w.end.y-w.start.y,L=Math.hypot(dx,dy)||1e-9;
-  return {L,ux:dx/L,uy:dy/L,nx:-dy/L,ny:dx/L,t:(w.thickness>0?w.thickness:15)}}
+  return {L,ux:dx/L,uy:dy/L,nx:-dy/L,ny:dx/L,t:coreT(w)}}
+function coreT(w){const ty=wallTypeOf(w);if(ty)return ty.core;const n=nameCore(w.wallType);if(n>0)return n;return w.thickness>0?w.thickness:15}
+const wallH=w=>w.height!=null?w.height:Math.max(w.startHeight!=null?w.startHeight:280,w.endHeight!=null?w.endHeight:280);
+const isLow=w=>wallH(w)<LOW_WALL;
 function closestOnSeg(p,a,b){const vx=b.x-a.x,vy=b.y-a.y,l2=vx*vx+vy*vy;if(!l2)return{x:a.x,y:a.y,t:0};
   const t=clamp(((p.x-a.x)*vx+(p.y-a.y)*vy)/l2,0,1);return{x:a.x+vx*t,y:a.y+vy*t,t}}
 function segInter(a,b,c,d){const r={x:b.x-a.x,y:b.y-a.y},s={x:d.x-c.x,y:d.y-c.y},den=cross(r,s);if(Math.abs(den)<1e-9)return null;
@@ -339,6 +372,30 @@ function setKitchen(f,o,W,L,R,anchor){
   const cx=anchor==='left'?X0+W/2:anchor==='right'?X0+o.W-W/2:0;const p=o.frame.toWorld(cx,Y0+D/2);
   f.position.x=r2(p.x);f.position.y=r2(p.y);f.width=W;f.depth=D;f.leftDepth=L;f.rightDepth=R;
   if(f.sinkAt!=null&&f.sinkAt>W-30)f.sinkAt=Math.max(30,W-30);
+}
+/* hosted furniture: as in the Revit families, the back sits on the wall's core face and the item slides along the wall.
+   Own key hostWallId; position and rotation stay the plain OpenPlan3D values, so a reader that ignores the key still gets the item where it is. */
+const hostable=f=>!FREE_FURN.has(catKey(f));
+const hostOf=f=>f.hostWallId!=null?wallById(f.hostWallId)||null:null;
+const backLocal=f=>{const c=CAT[catKey(f)];return c&&c.sym==='bed'?{x:-1,y:0}:{x:0,y:-1}};  // bed: head board at -x
+function hostCoords(p,s,e){const dx=e.x-s.x,dy=e.y-s.y,L=Math.hypot(dx,dy)||1e-9,ux=dx/L,uy=dy/L,rx=p.x-s.x,ry=p.y-s.y;
+  return {along:rx*ux+ry*uy,sd:(rx*-uy+ry*ux)>=0?1:-1,L}}
+function placeOn(f,w,along,sd){
+  const G=wg(w),z=furnSize(f),b=backLocal(f),h=b.x?z.w/2:z.d/2;
+  const mx=(f.scale&&f.scale.x<0)?-1:1,my=(f.scale&&f.scale.y<0)?-1:1;
+  let a=(Math.atan2(-sd*G.ny,-sd*G.nx)-Math.atan2(b.y*my,b.x*mx))*180/Math.PI;a=Math.round((((a%360)+360)%360)*100)/100;if(a>=360)a=0;
+  along=clamp(along,0,G.L);const off=sd*(G.t/2+h);
+  f.position.x=r2(w.start.x+G.ux*along+G.nx*off);f.position.y=r2(w.start.y+G.uy*along+G.ny*off);
+  if(f.rotation!==a)f.rotation=a;if(f.hostWallId!==w.id)f.hostWallId=w.id;
+}
+function seatOnHost(f){const w=hostOf(f);if(!w){if('hostWallId' in f)delete f.hostWallId;return}const c=hostCoords(f.position,w.start,w.end);placeOn(f,w,c.along,c.sd)}
+const reseatOn=w=>{for(const f of furn())if(String(f.hostWallId)===String(w.id))seatOnHost(f)};
+// the wall an item at p should hang on: the nearest one within reach of its back
+function findHost(p,f){
+  const z=furnSize(f),b=backLocal(f),h=b.x?z.w/2:z.d/2,reach=Math.max(h+80,70/view.s);let best=null,bd=Infinity;
+  for(const w of walls()){const c=hostCoords(p,w.start,w.end);if(c.along<-10||c.along>c.L+10)continue;
+    const q=closestOnSeg(p,w.start,w.end),d=dist(q,p);if(d<=reach&&d<bd){bd=d;best={w,along:c.along,sd:c.sd}}}
+  return best;
 }
 
 /* ============ undo / save ============ */
@@ -472,7 +529,7 @@ function snap(raw,from,opt){
 function beginGeom(){
   return {walls:walls().map(w=>({w,s:{x:w.start.x,y:w.start.y},e:{x:w.end.x,y:w.end.y}})),
     opens:openings().map(x=>({o:x.o,pos:x.o.position})),
-    furn:furn().map(f=>({f,x:f.position.x,y:f.position.y})),
+    furn:furn().map(f=>({f,x:f.position.x,y:f.position.y,rot:f.rotation})),
     lines:lines().map(l=>({l,s:{x:l.start.x,y:l.start.y},e:{x:l.end.x,y:l.end.y}})),
     polys:polys().map(p=>({p,pts:(p.points||[]).map(v=>({x:v.x,y:v.y}))}))};
 }
@@ -480,7 +537,7 @@ const setPt=(t,p)=>{if(t.x!==p.x)t.x=p.x;if(t.y!==p.y)t.y=p.y};
 function restoreGeom(g){
   for(const e of g.walls){setPt(e.w.start,e.s);setPt(e.w.end,e.e)}
   for(const e of g.opens)if(e.o.position!==e.pos)e.o.position=e.pos;
-  for(const e of g.furn)setPt(e.f.position,e);
+  for(const e of g.furn){setPt(e.f.position,e);if(e.f.rotation!==e.rot){if(e.rot===undefined)delete e.f.rotation;else e.f.rotation=e.rot}}
   for(const e of g.lines){setPt(e.l.start,e.s);setPt(e.l.end,e.e)}
   for(const e of g.polys)e.pts.forEach((v,i)=>{if(e.p.points[i])setPt(e.p.points[i],v)});
 }
@@ -516,7 +573,9 @@ function reflow(g,primary){
     const L0=dist(e.s,e.e),L1=dist(w.start,w.end),fromEnd=sMoved&&!eMoved&&!(primary&&primary.has(w));
     for(const oe of g.opens){const o=oe.o;if(String(o.wallId)!==String(w.id))continue;
       const hw=(o.width||0)/2;let c=fromEnd?L1-(L0-oe.pos*L0):oe.pos*L0;c=L1>=2*hw?clamp(c,hw,L1-hw):L1/2;
-      const np=L1>0?r8(c/L1):0.5;if(o.position!==np)o.position=np}}
+      const np=L1>0?r8(c/L1):0.5;if(o.position!==np)o.position=np}
+    for(const fe of g.furn){const f=fe.f;if(String(f.hostWallId)!==String(w.id))continue;
+      const c=hostCoords(fe,e.s,e.e);placeOn(f,w,fromEnd?L1-(L0-c.along):c.along,c.sd)}}
 }
 // settings.joinWalls off = "disconnected": only the wall itself moves, its neighbours stay put
 function translateWall(g,ge,d){
@@ -540,26 +599,27 @@ const opDist=(o,w)=>o.position*wg(w).L-(o.width||0)/2;  // wall start -> near ed
 function setOpDist(o,w,edge){const L=wg(w).L,hw=(o.width||0)/2;let c=edge+hw;c=L>=2*hw?clamp(c,hw,L-hw):L/2;o.position=r8(c/L)}
 
 /* ============ temporary dimensions (tap the number to move the selected element) ============ */
+// One reference everywhere, as the office's Revit temporary dimensions: walls to faces of core, doors and windows to the opening edge.
 function wallTD(w){
-  const G=wg(w),face=settings.dimMode!=='axis',best={},out=[];
+  const G=wg(w),best={},out=[];
   for(const o of walls()){if(o===w)continue;const Go=wg(o);if(Math.abs(G.ux*Go.uy-G.uy*Go.ux)>0.02)continue;
     const a=(o.start.x-w.start.x)*G.ux+(o.start.y-w.start.y)*G.uy,b=(o.end.x-w.start.x)*G.ux+(o.end.y-w.start.y)*G.uy;
     const lo=Math.max(0,Math.min(a,b)),hi=Math.min(G.L,Math.max(a,b));if(hi-lo<1)continue;
     const off=(o.start.x-w.start.x)*G.nx+(o.start.y-w.start.y)*G.ny;if(Math.abs(off)<1)continue;
     const sg=off>0?1:-1;if(!best[sg]||Math.abs(off)<Math.abs(best[sg].off))best[sg]={Go,off,sg,along:(lo+hi)/2}}
   for(const k of [1,-1]){const B=best[k];if(!B)continue;
-    const P={x:w.start.x+G.ux*B.along,y:w.start.y+G.uy*B.along},s0=face?G.t/2:0,s1=Math.abs(B.off)-(face?B.Go.t/2:0),gap=s1-s0;
+    const P={x:w.start.x+G.ux*B.along,y:w.start.y+G.uy*B.along},s0=G.t/2,s1=Math.abs(B.off)-B.Go.t/2,gap=s1-s0;
     out.push({a:{x:P.x+G.nx*B.sg*s0,y:P.y+G.ny*B.sg*s0},b:{x:P.x+G.nx*B.sg*s1,y:P.y+G.ny*B.sg*s1},value:gap,
       apply:v=>{const m=(gap-v)*B.sg,g=beginGeom();translateWall(g,g.walls.find(x=>x.w===w),{x:G.nx*m,y:G.ny*m})}})}
   return out;
 }
 function openTD(o,w){
-  const G=wg(w),L=G.L,face=settings.dimMode!=='axis',e0=o.position*L-o.width/2,e1=e0+o.width,u={x:G.ux,y:G.uy};
+  const G=wg(w),L=G.L,e0=o.position*L-o.width/2,e1=e0+o.width,u={x:G.ux,y:G.uy};
   const stops=[0,L];
   for(const q of walls()){if(q===w)continue;const Gq=wg(q),uq={x:Gq.ux,y:Gq.uy},den=cross(u,uq);if(Math.abs(den)<0.02)continue;
     const A={x:q.start.x-w.start.x,y:q.start.y-w.start.y},s=cross(A,uq)/den,t=cross(A,u)/den,m=G.t/2+1;
     if(s<-1||s>L+1||t<-m||t>Gq.L+m)continue;
-    if(face){const hw=(Gq.t/2)/Math.abs(den);stops.push(s-hw,s+hw)}else stops.push(s)}
+    const hw=(Gq.t/2)/Math.abs(den);stops.push(s-hw,s+hw)}
   for(const x of openings()){if(x.o===o||String(x.o.wallId)!==String(w.id))continue;const c=x.o.position*L;stops.push(c-x.o.width/2,c+x.o.width/2)}
   const lo=Math.max(...stops.filter(s=>s<=e0+0.01)),hi=Math.min(...stops.filter(s=>s>=e1-0.01));
   const P=t=>({x:w.start.x+G.ux*t,y:w.start.y+G.uy*t}),out=[];
@@ -569,16 +629,17 @@ function openTD(o,w){
 }
 function furnTD(f){
   const z=furnSize(f),a=(f.rotation||0)*Math.PI/180,ex={x:Math.cos(a),y:Math.sin(a)},ey={x:-Math.sin(a),y:Math.cos(a)};
-  const face=settings.dimMode!=='axis',out=[],P=f.position;
+  const out=[],P=f.position,host=hostOf(f),HG=host&&wg(host);
   for(const [dir,h] of [[ex,z.w/2],[{x:-ex.x,y:-ex.y},z.w/2],[ey,z.d/2],[{x:-ey.x,y:-ey.y},z.d/2]]){
+    if(HG&&Math.abs(dir.x*HG.nx+dir.y*HG.ny)>0.5)continue;  // a hosted item only slides along its wall
     let best=null;
     for(const w of walls()){const G=wg(w),v={x:w.end.x-w.start.x,y:w.end.y-w.start.y},den=cross(dir,v);if(Math.abs(den)<1e-9)continue;
       const A={x:w.start.x-P.x,y:w.start.y-P.y},s=cross(A,v)/den,t=cross(A,dir)/den;if(t<0||t>1)continue;
       const cosn=Math.abs(dir.x*G.nx+dir.y*G.ny);if(cosn<0.2)continue;
-      const sf=face?s-(G.t/2)/cosn:s;if(sf<h-1)continue;if(best==null||sf<best)best=sf}
+      const sf=s-(G.t/2)/cosn;if(sf<h-1)continue;if(best==null||sf<best)best=sf}
     if(best==null)continue;const gap=best-h;
     out.push({a:{x:P.x+dir.x*h,y:P.y+dir.y*h},b:{x:P.x+dir.x*best,y:P.y+dir.y*best},value:gap,
-      apply:v=>{const m=gap-v;P.x=r2(P.x+dir.x*m);P.y=r2(P.y+dir.y*m)}});
+      apply:v=>{const m=gap-v;P.x=r2(P.x+dir.x*m);P.y=r2(P.y+dir.y*m);if(host)seatOnHost(f)}});
   }
   return out;
 }
@@ -600,7 +661,7 @@ let raf=0;function render(){if(!raf)raf=requestAnimationFrame(()=>{raf=0;draw(ct
 function planBounds(){
   let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;const ext=(x,y,m)=>{m=m||0;x0=Math.min(x0,x-m);y0=Math.min(y0,y-m);x1=Math.max(x1,x+m);y1=Math.max(y1,y+m)};
   const f=floor();
-  for(const w of f.walls||[]){const t=(w.thickness||15)/2;ext(w.start.x,w.start.y,t);ext(w.end.x,w.end.y,t)}
+  for(const w of f.walls||[]){const t=coreT(w)/2;ext(w.start.x,w.start.y,t);ext(w.end.x,w.end.y,t)}
   for(const o of f.furniture||[]){const s=furnSize(o);ext(o.position.x,o.position.y,Math.hypot(s.w,s.d)/2)}
   for(const c of f.columns||[])if(c.position)ext(c.position.x,c.position.y,(c.diameter||30)/2);
   for(const s of f.stairs||[])if(s.position)ext(s.position.x,s.position.y,Math.hypot(s.width||100,s.depth||300)/2);
@@ -638,7 +699,7 @@ function ensureVisible(){
 
 function isConnected(w,p){
   for(const o of walls()){if(o===w)continue;if(near(o.start,p,1)||near(o.end,p,1))return true;
-    const q=closestOnSeg(p,o.start,o.end);if(dist(q,p)<=(o.thickness||15)/2+0.5)return true}
+    const q=closestOnSeg(p,o.start,o.end);if(dist(q,p)<=coreT(o)/2+0.5)return true}
   return false;
 }
 function draw(c,V,W,H,DPR,print){
@@ -682,8 +743,11 @@ function draw(c,V,W,H,DPR,print){
       const P=t=>({x:w.start.x+G.ux*t,y:w.start.y+G.uy*t});const A=P(a),B=P(b),hx=G.nx*G.t/2,hy=G.ny*G.t/2;
       c.moveTo(A.x+hx,A.y+hy);c.lineTo(B.x+hx,B.y+hy);c.lineTo(B.x-hx,B.y-hy);c.lineTo(A.x-hx,A.y-hy);c.closePath()}
   };
-  c.beginPath();for(const w of ws)wallPath(w);c.fillStyle='#2b2b2b';c.fill();
-  if(!print&&sel&&sel.kind==='wall'){const w=getSel();if(w){c.beginPath();wallPath(w);c.fillStyle='#1565c0';c.fill()}}
+  // a low wall (under LOW_WALL cm) is cut below the plan's cut plane: outline only, no poché
+  c.beginPath();for(const w of ws)if(!isLow(w))wallPath(w);c.fillStyle='#2b2b2b';c.fill();
+  c.beginPath();for(const w of ws)if(isLow(w))wallPath(w);c.fillStyle='#fff';c.fill();c.lineWidth=1.3/S;c.strokeStyle='#2b2b2b';c.stroke();
+  if(!print&&sel&&sel.kind==='wall'){const w=getSel();if(w){c.beginPath();wallPath(w);
+    if(isLow(w)){c.fillStyle='rgba(21,101,192,.15)';c.fill();c.lineWidth=2.2/S;c.strokeStyle='#1565c0';c.stroke()}else{c.fillStyle='#1565c0';c.fill()}}}
   // openings
   for(const x of openings()){const w=wallById(x.o.wallId);if(!w)continue;
     const isSel=!print&&sel&&sel.kind===x.kind&&sel.id===x.o.id;
@@ -744,7 +808,7 @@ function draw(c,V,W,H,DPR,print){
         c.globalAlpha=0.3;c.fillStyle=settings.areaColor;c.fill();c.globalAlpha=1;c.lineWidth=2/S;c.strokeStyle=settings.areaColor;c.stroke()}
       if(v.length>=3){screenT();label(c,sp(polyCentroid(v)),0,polyArea(v).toFixed(2)+' מ"ר',shade(settings.areaColor),14);worldT()}}
     if(chain&&preview&&tool!=='area'){const a=chain.last,bp=preview.p,L=dist(a,bp);
-      if(L>0.5&&tool==='wall'){const G=wg({start:a,end:bp,thickness:settings.wallThickness});c.beginPath();
+      if(L>0.5&&tool==='wall'){const G=wg({start:a,end:bp,wallType:settings.wallType});c.beginPath();
         const hx=G.nx*G.t/2,hy=G.ny*G.t/2;c.moveTo(a.x+hx,a.y+hy);c.lineTo(bp.x+hx,bp.y+hy);c.lineTo(bp.x-hx,bp.y-hy);c.lineTo(a.x-hx,a.y-hy);c.closePath();
         c.fillStyle='rgba(21,101,192,.35)';c.fill();c.lineWidth=1.5/S;c.strokeStyle='#1565c0';c.stroke();
         c.setLineDash([6/S,4/S]);c.beginPath();c.moveTo(a.x,a.y);c.lineTo(bp.x,bp.y);c.stroke();c.setLineDash([])}
@@ -921,9 +985,9 @@ function hitTest(wp,touch){
   if(lb)return{kind:'line',el:lb};
   let wb=null,wd=Infinity;
   for(const w of walls()){const q=closestOnSeg(wp,w.start,w.end),d=dist(q,wp);if(d<wd){wd=d;wb=w}}
-  if(wb&&wd<=(wb.thickness||15)/2)return{kind:'wall',el:wb};
+  if(wb&&wd<=coreT(wb)/2)return{kind:'wall',el:wb};
   const fs=furn();for(let i=fs.length-1;i>=0;i--)if(furnContains(fs[i],wp,tol*0.3))return{kind:'furniture',el:fs[i]};
-  if(wb&&wd<=(wb.thickness||15)/2+tol)return{kind:'wall',el:wb};
+  if(wb&&wd<=coreT(wb)/2+tol)return{kind:'wall',el:wb};
   const ps=polys();for(let i=ps.length-1;i>=0;i--)if(ps[i].points&&ps[i].points.length>2&&inPoly(wp,ps[i].points))return{kind:'polygon',el:ps[i]};
   return null;
 }
@@ -1007,8 +1071,10 @@ function singleMove(e){
   if(g.target==='open'){const w=wallById(el.wallId),G=wg(w);
     let edge=((wp.x-w.start.x)*G.ux+(wp.y-w.start.y)*G.uy)-g.grab-el.width/2;if(settings.round5)edge=Math.round(edge/5)*5;
     setOpDist(el,w,edge);setHud('מרחק מתחילת הקיר: '+fmt(opDist(el,w))+' ס"מ')}
-  else if(g.target==='furn'){let x=wp.x-g.grab.x,y=wp.y-g.grab.y;if(settings.round5){x=Math.round(x/5)*5;y=Math.round(y/5)*5}
-    el.position.x=r2(x);el.position.y=r2(y)}
+  else if(g.target==='furn'){let x=wp.x-g.grab.x,y=wp.y-g.grab.y;
+    const hw=hostable(el)?hostOf(el):null,hit=hostable(el)?(findHost({x,y},el)||(hw&&Object.assign({w:hw},hostCoords({x,y},hw.start,hw.end)))):null;
+    if(hit){const z=furnSize(el),ha=backLocal(el).x?z.d/2:z.w/2;let a=hit.along;if(settings.round5)a=Math.round((a-ha)/5)*5+ha;placeOn(el,hit.w,a,hit.sd)}
+    else{if(settings.round5){x=Math.round(x/5)*5;y=Math.round(y/5)*5}el.position.x=r2(x);el.position.y=r2(y)}}
   else if(g.target==='handle')dragHandle(g,h,wp);
   else if(g.target==='body'){
     if(h.kind==='wall'){const G=wg(el);let off=(wp.x-g.downW.x)*G.nx+(wp.y-g.downW.y)*G.ny;if(settings.round5)off=Math.round(off/5)*5;
@@ -1068,6 +1134,8 @@ function tap(g){
     const it=pendingFurn;let x=wp.x,y=wp.y;if(settings.round5){x=Math.round(x/5)*5;y=Math.round(y/5)*5}
     let id;commit(()=>{id=newId('f-');const el=CUSTOM.has(it.key)?{id,catalogId:'imported_object',sourceCategory:it.key}:{id,catalogId:it.key};
       Object.assign(el,{position:{x,y},rotation:0,scale:{x:1,y:1,z:1},width:it.w,depth:it.d},it.extra?JSON.parse(JSON.stringify(it.extra)):{});
+      if(hostable(el)){const hit=findHost(wp,el),z=furnSize(el),ha=backLocal(el).x?z.d/2:z.w/2;
+        if(hit)placeOn(el,hit.w,settings.round5?Math.round((hit.along-ha)/5)*5+ha:hit.along,hit.sd);else toast('לא נמצא קיר קרוב: הפריט הונח חופשי. גרור אותו אל קיר')}
       ensureArr('furniture').push(el)});
     sel={kind:'furniture',id};pendingFurn=null;setTool('select');refreshPanel();render();ensureVisible();return}
 }
@@ -1085,7 +1153,8 @@ function commitDraw(a,b){
   if(tool==='area'){
     if(near(B,chain.first,0.5)){if(chain.points.length>=3)finishArea();return}
     chain.points.push(B);chain.last=B;updateToolOpts();render();return}
-  if(tool==='wall')commit(()=>{ensureArr('walls').push({id:newId('w-'),start:A,end:B,thickness:settings.wallThickness,height:settings.wallHeight,wallType:settings.wallType})});
+  if(tool==='wall')commit(()=>{const ty=wallTypeOf({wallType:settings.wallType});
+    ensureArr('walls').push({id:newId('w-'),start:A,end:B,thickness:ty.total,height:settings.wallHeight,wallType:ty.name})});
   else commit(()=>{ensureArr('markupLines').push({id:newId('ln-'),start:A,end:B,color:settings.lineColor,width:settings.lineWidth})});
   chain.last=B;setHud('');
   if(near(B,chain.first,0.5)){endChain();toast('השרשרת נסגרה')}
@@ -1097,11 +1166,11 @@ function finishArea(){
 }
 function endChain(){if(tool==='area'&&chain&&chain.points.length>=3){finishArea();return}chain=null;preview=null;setHud('');render();updateToolOpts()}
 function addOpening(kind,w,along){
-  const G=wg(w);const width=kind==='door'?90:120;let edge=along-width/2;if(settings.round5)edge=Math.round(edge/5)*5;
+  const G=wg(w),fm=kind==='door'?DOOR_FAMS[0]:WIN_FAMS[0],width=fm.w;let edge=along-width/2;if(settings.round5)edge=Math.round(edge/5)*5;
   let id;commit(()=>{
-    const o=kind==='door'?{id:newId('d-'),wallId:w.id,position:0.5,width,height:210,type:'single',swingDirection:'left',flipSide:false}
-      :{id:newId('win-'),wallId:w.id,position:0.5,width,height:120,sillHeight:90,type:'standard'};
-    if(G.L<width)o.width=Math.max(10,Math.floor(G.L*0.8));setOpDist(o,w,edge);id=o.id;ensureArr(kind==='door'?'doors':'windows').push(o)});
+    const o=kind==='door'?{id:newId('d-'),wallId:w.id,position:0.5,width,height:fm.h,type:fm.draw,swingDirection:'left',flipSide:false,revitFamily:fm.fam}
+      :{id:newId('win-'),wallId:w.id,position:0.5,width,height:fm.h,sillHeight:fm.sill,type:fm.draw,revitFamily:fm.fam};
+    if(G.L<width)o.width=Math.max(10,Math.floor(G.L*0.8));syncOpenType(kind,o);setOpDist(o,w,edge);id=o.id;ensureArr(kind==='door'?'doors':'windows').push(o)});
   sel={kind,id};setTool('select');refreshPanel();render();ensureVisible();
 }
 
@@ -1131,13 +1200,9 @@ function updateToolOpts(){
   if(!DRAW_TOOLS.has(tool)){box.classList.remove('show');box.innerHTML='';return}
   let h='';
   if(tool==='wall'){
-    const tl=[10,12,15,20,25,30,40];
-    const tOpts=(tl.includes(settings.wallThickness)?'':'<option selected value="'+settings.wallThickness+'">'+settings.wallThickness+'</option>')+
-      tl.map(v=>'<option value="'+v+'"'+(v===settings.wallThickness?' selected':'')+'>'+v+'</option>').join('');
-    const types=WALL_TYPES.map(w=>'<option'+(w.name===settings.wallType?' selected':'')+'>'+esc(w.name)+'</option>').join('')+
-      (WALL_TYPES.some(w=>w.name===settings.wallType)?'':'<option selected>'+esc(settings.wallType)+'</option>');
+    const types=WALL_TYPES.map(w=>'<option value="'+esc(w.name)+'"'+(w.name===settings.wallType?' selected':'')+'>'+esc(w.name)+' · '+esc(w.he)+'</option>').join('');
     h='<span class="chip">סוג <select id="woType">'+types+'</select></span>'+
-      '<span class="chip">עובי <select id="woT">'+tOpts+'</select> ס"מ</span>'+
+      '<span class="chip">ליבה '+fmt(wallTypeOf({wallType:settings.wallType}).core)+' ס"מ</span>'+
       '<span class="chip">גובה <input id="woH" inputmode="decimal" value="'+settings.wallHeight+'"></span>';
   }else if(tool==='line'){
     h='<span class="chip">'+swatches(settings.lineColor,'data-lc')+'</span>'+
@@ -1151,8 +1216,7 @@ function updateToolOpts(){
   }
   box.innerHTML=h;box.classList.add('show');
   const on=(id,ev,fn)=>{const e=$('#'+id);if(e)e['on'+ev]=fn};
-  on('woType','change',e=>{const t=WALL_TYPES.find(w=>w.name===e.target.value);settings.wallType=e.target.value;if(t)settings.wallThickness=t.t;saveNow();updateToolOpts()});
-  on('woT','change',e=>{settings.wallThickness=+e.target.value;saveNow();render()});
+  on('woType','change',e=>{settings.wallType=e.target.value;saveNow();updateToolOpts();render()});
   on('woH','change',e=>{const v=parseNum(e.target.value);if(v>0){settings.wallHeight=v;saveNow()}else e.target.value=settings.wallHeight});
   on('woEnd','click',endChain);
   on('woCancel','click',()=>{chain=null;preview=null;updateToolOpts();render()});
@@ -1171,7 +1235,6 @@ const F={
   info:(label,text)=>'<div class="field"><label>'+label+'</label><div class="info">'+text+'</div></div>'
 };
 const btn=(a,t,cls)=>'<button class="btn sm'+(cls?' '+cls:'')+'" data-a="'+a+'">'+t+'</button>';
-const dimSeg=()=>F.seg('מידות זמניות','dimmode',[['face','פנים'],['axis','ציר']],settings.dimMode);
 function refreshPanel(){
   const pn=$('#panel');const el=getSel();
   if(!el){pn.classList.remove('show');pn.innerHTML='';pn.dataset.for='';return}
@@ -1179,26 +1242,28 @@ function refreshPanel(){
   const key=sel.kind+':'+sel.id,oldF=pn.querySelector('.fields'),oldA=pn.querySelector('.acts');
   const keep=pn.dataset.for===key?{f:oldF?oldF.scrollLeft:0,a:oldA?oldA.scrollLeft:0,t:pn.scrollTop}:null;
   const k=sel.kind,ck=k==='furniture'?catKey(el):null;
-  let h='<div class="ph"><h3>'+KIND_HE[k]+(ck&&CAT[ck]?' · '+CAT[ck].he:'')+'</h3>'+(el.revitId!=null?'<span class="badge" title="מזהה רוויט">Revit '+esc(el.revitId)+'</span>':'')+
+  const fam=(k==='door'||k==='window')?famOf(k,el):null,sub=ck&&CAT[ck]?CAT[ck].he:fam?fam.fam+' '+revitTypeName(el):k==='wall'?el.wallType||'':'';
+  let h='<div class="ph"><h3>'+KIND_HE[k]+(sub?' · '+esc(sub):'')+'</h3>'+(el.revitId!=null?'<span class="badge" title="מזהה רוויט">Revit '+esc(el.revitId)+'</span>':'')+
     '<span class="id">'+esc(el.id)+'</span>'+
     '<button class="ib" data-a="mini" aria-label="כווץ"><svg viewBox="0 0 24 24"><path d="'+(settings.panelMini?'M6 15l6-6 6 6':'M6 9l6 6 6-6')+'"/></svg></button>'+
     '<button class="ib" data-a="close" aria-label="סגור"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
   let fl='',ac='',hint='';
   if(k==='wall'){const G=wg(el);
     fl+=F.num('אורך','len',fmt(G.L))+F.seg('קצה קבוע','fixed',[['start','התחלה'],['center','אמצע'],['end','סוף']],settings.fixedEnd)+
-      F.num('עובי','thickness',el.thickness)+F.num('גובה','height',el.height!=null?el.height:Math.max(el.startHeight!=null?el.startHeight:280,el.endHeight!=null?el.endHeight:280));
-    const types=[['','— ללא —']].concat(WALL_TYPES.map(w=>[w.name,w.name]));if(el.wallType&&!WALL_TYPES.some(w=>w.name===el.wallType))types.push([el.wallType,el.wallType]);types.push(['__other','אחר…']);
-    fl+=F.sel('סוג קיר','wallType',types,el.wallType||'')+F.seg('פינות','join',[['1','מחובר'],['0','מנותק']],settings.joinWalls?'1':'0')+dimSeg();
+      F.num('גובה','height',wallH(el));
+    // office types only; a name read from a model that is not in the template is shown, never offered for new walls
+    const types=WALL_TYPES.map(w=>[w.name,w.name+' · '+w.he]);if(!wallTypeOf(el))types.unshift(['',el.wallType||'— בחר סוג —']);
+    fl+=F.sel('סוג קיר','wallType',types,wallTypeOf(el)?el.wallType:'')+F.info('ליבה',fmt(coreT(el))+' ס"מ')+
+      F.seg('פינות','join',[['1','מחובר'],['0','מנותק']],settings.joinWalls?'1':'0');
     ac=btn('addDoor','+ דלת')+btn('addWin','+ חלון')+btn('flip','היפוך כיוון')+btn('del','מחק','danger');
     hint='כל המידות בס"מ. הקש על מספר ירוק כדי להזיז את הקיר. קירות מחוברים זזים איתו; דלתות וחלונות שומרים את המרחק מתחילת הקיר.';
   }else if(k==='door'||k==='window'){const w=wallById(el.wallId);
-    fl+=F.num('רוחב','width',el.width)+F.num('מתחילת הקיר','dist',w?fmt(opDist(el,w)):'')+F.num('גובה','height',el.height!=null?el.height:(k==='door'?210:120));
+    fl+=F.num('רוחב','width',el.width)+F.num('גובה','height',el.height!=null?el.height:(k==='door'?210:120));
     if(k==='window')fl+=F.num('גובה אדן','sillHeight',el.sillHeight!=null?el.sillHeight:90);
-    fl+=F.sel('סוג','type',k==='door'?DOOR_TYPES:WIN_TYPES,el.type||(k==='door'?'single':'standard'));
-    if(k==='door')fl+=F.seg('ציר','swing',[['right','בהתחלה'],['left','בסוף']],el.swingDirection||'left')+F.seg('צד פתיחה','flip',[['0','א׳'],['1','ב׳']],el.flipSide?'1':'0');
-    fl+=dimSeg();
+    fl+=openTypeField(k,el);
+    if(k==='door')fl+=F.seg('צד הצירים','swing',[['right','בהתחלה'],['left','בסוף']],el.swingDirection||'left')+F.seg('צד פתיחה','flip',[['0','א׳'],['1','ב׳']],el.flipSide?'1':'0');
     ac=(k==='door'?btn('flipBoth','⟲ סובב פתיחה'):'')+btn('del','מחק','danger');
-    hint='"מתחילת הקיר" נמדד מציר תחילת הקיר עד קצה הפתח. הקש על מספר ירוק כדי לקבוע מרחק לקיר או לפתח הסמוך.';
+    hint='המידות הירוקות: מפני ליבת הקיר הניצב (או מהפתח הסמוך) עד קצה הפתח, כמו המידות הזמניות ברוויט. הקש על מספר כדי לשנות.';
   }else if(k==='furniture'){const z=furnSize(el);
     if(ck==='kitchen_u'){const kp=kParams(el);
       fl+=F.num('רוחב','fw',fmt(kp.W))+F.num('רגל שמאל','kL',fmt(kp.L))+F.num('רגל ימין','kR',fmt(kp.R))+F.num('עומק משטח','kcd',fmt(kp.cd))+
@@ -1208,9 +1273,12 @@ function refreshPanel(){
       fl+=F.num('רוחב','fw',fmt(z.w))+F.num('עומק','fd',fmt(z.d));
       if(ck==='bed_queen'||ck==='bed_twin')fl+=F.seg('שידות','ns',[['none','ללא'],['left','שמאל'],['right','ימין'],['both','שתיים']],el.nightstands||'none');
     }
-    fl+=F.num('סיבוב°','rotation',fmt(el.rotation||0))+dimSeg();
-    ac=btn('rotL','⟲ 90°')+btn('rotR','⟳ 90°')+btn('mirror','מראה')+btn('dup','שכפל')+btn('del','מחק','danger');
-    if(!hint)hint='הקש על מספר ירוק כדי לקבוע את המרחק מהקיר.';
+    const hw=hostOf(el);
+    if(hw){fl+=F.info('צמוד לקיר',esc(hw.wallType||hw.id));ac=btn('side','⇄ לצד השני של הקיר')}
+    else{fl+=F.num('סיבוב°','rotation',fmt(el.rotation||0));ac=btn('rotL','⟲ 90°')+btn('rotR','⟳ 90°')}
+    ac+=btn('mirror','מראה')+btn('dup','שכפל')+btn('del','מחק','danger');
+    if(!hint)hint=hw?'הגב צמוד לפני ליבת הקיר. גרור לאורך הקיר או אל קיר אחר; הקש על מספר ירוק לקביעת המרחק.':
+      hostable(el)?'גרור את הפריט אל קיר כדי להצמיד אותו.':'הקש על מספר ירוק כדי לקבוע את המרחק מהקיר.';
   }else if(k==='line'){
     fl+=F.num('אורך','llen',fmt(dist(el.start,el.end)))+F.sw('צבע','lcolor',el.color||'#e53935')+F.seg('עובי','lw',[[1,'דק'],[2,'בינוני'],[4,'עבה']],el.width||2);
     ac=btn('del','מחק','danger');hint='האורך משתנה מנקודת ההתחלה. גרור קצה או גרור את הקו.';
@@ -1249,28 +1317,26 @@ function refreshPanel(){
 function refreshPanelValues(){const pn=$('#panel'),el=getSel();if(!el||!pn.classList.contains('show'))return;
   const set=(k,v)=>{const i=pn.querySelector('input[data-k="'+k+'"]');if(i&&document.activeElement!==i)i.value=v};
   if(sel.kind==='wall')set('len',fmt(wg(el).L));
-  if(sel.kind==='door'||sel.kind==='window'){const w=wallById(el.wallId);if(w)set('dist',fmt(opDist(el,w)))}
   if(sel.kind==='line')set('llen',fmt(dist(el.start,el.end)));
   if(sel.kind==='polygon'){const i=pn.querySelector('.info');if(i)i.textContent=polyArea(el.points||[]).toFixed(2)+' מ"ר'}
   if(sel.kind==='furniture'&&catKey(el)==='kitchen_u'){const kp=kParams(el);set('fw',fmt(kp.W));set('kL',fmt(kp.L));set('kR',fmt(kp.R))}
 }
 function applyField(k,raw){
   const el=getSel();if(!el)return;
-  if(k==='wallType'){if(raw==='__other'){const v=prompt('שם סוג הקיר (כפי שמופיע ברוויט):',el.wallType||'');if(v==null){refreshPanel();return}raw=v.trim()}
-    commit(()=>{if(raw){el.wallType=raw;const t=WALL_TYPES.find(w=>w.name===raw);if(t)el.thickness=t.t}else delete el.wallType});return}
-  if(k==='type'){commit(()=>{el.type=raw});return}
+  if(k==='wallType'){const t=WALL_TYPES.find(w=>w.name===raw);if(!t){refreshPanel();return}
+    commit(()=>{el.wallType=t.name;el.thickness=t.total;reseatOn(el)});return}
+  if(k==='fam'){const fm=(sel.kind==='door'?DOOR_FAMS:WIN_FAMS).find(f=>f.fam===raw),w=wallById(el.wallId);if(!fm||!w){refreshPanel();return}
+    commit(()=>{const edge=opDist(el,w);el.revitFamily=fm.fam;el.type=fm.draw;el.width=fm.w;el.height=fm.h;if(fm.sill!=null)el.sillHeight=fm.sill;setOpDist(el,w,edge);syncOpenType(sel.kind,el)});return}
   if(k==='pname'){commit(()=>{if(el.name===raw.trim())return false;el.name=raw.trim()});return}
   const v=parseNum(raw);
   if(!isFinite(v)){refreshPanel();return}
   const bad=()=>{refreshPanel();return};
   if(sel.kind==='wall'){
     if(k==='len'){if(v<1){toast('אורך מינימלי 1 ס"מ');return bad()}commit(()=>setWallLength(el,v,settings.fixedEnd))}
-    else if(k==='thickness'){if(v<=0)return bad();commit(()=>{el.thickness=v})}
     else if(k==='height'){if(v<0)return bad();commit(()=>{el.height=v;if('startHeight' in el)el.startHeight=v;if('endHeight' in el)el.endHeight=v})}
   }else if(sel.kind==='door'||sel.kind==='window'){const w=wallById(el.wallId);
-    if(k==='width'){if(v<=0)return bad();const edge=opDist(el,w);commit(()=>{el.width=v;setOpDist(el,w,edge)})}
-    else if(k==='dist'){commit(()=>setOpDist(el,w,v))}
-    else if(k==='height'){if(v<=0)return bad();commit(()=>{el.height=v})}
+    if(k==='width'){if(v<=0)return bad();const edge=opDist(el,w);commit(()=>{el.width=v;setOpDist(el,w,edge);syncOpenType(sel.kind,el)})}
+    else if(k==='height'){if(v<=0)return bad();commit(()=>{el.height=v;syncOpenType(sel.kind,el)})}
     else if(k==='sillHeight'){if(v<0)return bad();commit(()=>{el.sillHeight=v})}
   }else if(sel.kind==='furniture'){
     const sx=Math.abs((el.scale&&el.scale.x)||1),sy=Math.abs((el.scale&&el.scale.y)||1);
@@ -1281,8 +1347,8 @@ function applyField(k,raw){
       if(k==='ksink'){commit(()=>{el.sinkAt=clamp(v,30,kp.W-30)});return}
       if(k==='kcookAt'){commit(()=>{el.cooktopAt=v});return}
     }
-    if(k==='fw'){if(v<=0)return bad();commit(()=>{el.width=r2(v/sx)})}
-    else if(k==='fd'){if(v<=0)return bad();commit(()=>{el.depth=r2(v/sy)})}
+    if(k==='fw'){if(v<=0)return bad();commit(()=>{el.width=r2(v/sx);if(hostOf(el))seatOnHost(el)})}
+    else if(k==='fd'){if(v<=0)return bad();commit(()=>{el.depth=r2(v/sy);if(hostOf(el))seatOnHost(el)})}
     else if(k==='rotation'){commit(()=>{el.rotation=((v%360)+360)%360})}
   }else if(sel.kind==='line'){
     if(k==='llen'){if(v<1)return bad();const L=dist(el.start,el.end)||1,ux=(el.end.x-el.start.x)/L,uy=(el.end.y-el.start.y)/L;
@@ -1291,7 +1357,6 @@ function applyField(k,raw){
 }
 function applySeg(g,v){
   if(g==='fixed'){settings.fixedEnd=v;saveNow();refreshPanel();return}
-  if(g==='dimmode'){settings.dimMode=v;saveNow();refreshPanel();render();return}
   if(g==='join'){setJoin(v==='1');return}
   const el=getSel();if(!el)return;
   if(g==='swing')commit(()=>{if((el.swingDirection||'left')===v)return false;el.swingDirection=v});
@@ -1304,15 +1369,20 @@ function applySeg(g,v){
 function panelAction(a){
   if(a==='mini'){settings.panelMini=!settings.panelMini;saveNow();refreshPanel();return}
   const el=getSel();if(a==='close'){sel=null;refreshPanel();render();return}if(!el)return;const k=sel.kind;
-  if(a==='del'){commit(()=>{const f=floor();if(k==='wall'){['doors','windows'].forEach(x=>{if(Array.isArray(f[x]))f[x]=f[x].filter(o=>String(o.wallId)!==String(el.id))})}
+  if(a==='del'){commit(()=>{const f=floor();if(k==='wall'){['doors','windows'].forEach(x=>{if(Array.isArray(f[x]))f[x]=f[x].filter(o=>String(o.wallId)!==String(el.id))});
+      for(const o of furn())if(String(o.hostWallId)===String(el.id))delete o.hostWallId}
       f[ARR[k]]=f[ARR[k]].filter(e=>e!==el)});sel=null;refreshPanel();render();return}
   if(a==='addDoor'||a==='addWin'){addOpening(a==='addDoor'?'door':'window',el,wg(el).L/2);return}
   if(a==='flip'){commit(()=>{const s={x:el.start.x,y:el.start.y};el.start.x=el.end.x;el.start.y=el.end.y;el.end.x=s.x;el.end.y=s.y;
       for(const x of openings())if(String(x.o.wallId)===String(el.id)){x.o.position=r8(1-x.o.position);if(x.kind==='door'){x.o.flipSide=!x.o.flipSide;x.o.swingDirection=(x.o.swingDirection||'left')==='left'?'right':'left'}}});return}
   if(a==='flipBoth'){commit(()=>{el.flipSide=!el.flipSide;el.swingDirection=(el.swingDirection||'left')==='left'?'right':'left'});return}
   if(a==='rotL'||a==='rotR'){commit(()=>{el.rotation=(((el.rotation||0)+(a==='rotR'?90:-90))%360+360)%360});return}
-  if(a==='mirror'){commit(()=>{if(!el.scale)el.scale={x:1,y:1,z:1};el.scale.x=-(el.scale.x||1)});return}
-  if(a==='dup'){let id;commit(()=>{const c=JSON.parse(JSON.stringify(el));delete c.revitId;delete c.revitUniqueId;id=newId('f-');c.id=id;c.position={x:r2(el.position.x+30),y:r2(el.position.y+30)};ensureArr('furniture').push(c)});sel={kind:'furniture',id};refreshPanel();render()}
+  if(a==='side'){commit(()=>{const w=hostOf(el);if(!w)return false;const c=hostCoords(el.position,w.start,w.end);placeOn(el,w,c.along,-c.sd)});return}
+  if(a==='mirror'){commit(()=>{if(!el.scale)el.scale={x:1,y:1,z:1};el.scale.x=-(el.scale.x||1);if(hostOf(el))seatOnHost(el)});return}
+  if(a==='dup'){let id;commit(()=>{const c=JSON.parse(JSON.stringify(el));delete c.revitId;delete c.revitUniqueId;id=newId('f-');c.id=id;
+    const w=hostOf(el);if(w){const G=wg(w),z=furnSize(el),ha=backLocal(el).x?z.d/2:z.w/2;c.position={x:r2(el.position.x+G.ux*(2*ha+10)),y:r2(el.position.y+G.uy*(2*ha+10))}}
+    else c.position={x:r2(el.position.x+30),y:r2(el.position.y+30)};
+    ensureArr('furniture').push(c);if(w)seatOnHost(c)});sel={kind:'furniture',id};refreshPanel();render()}
 }
 
 /* ============ dialogs, menu ============ */
@@ -1399,6 +1469,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)saveNow()})
 /* ============ boot ============ */
 function boot(){
   try{const s=JSON.parse(localStorage.getItem(LS_SETTINGS)||'null');if(s){Object.assign(settings,s.settings||{});if(s.view)view=s.view;curFloorId=s.curFloorId||null;penSeen=!settings.fingerDraws}}catch(e){}
+  if(!wallTypeOf({wallType:settings.wallType}))settings.wallType=DEFAULT_WALL;  // a type saved before the office list
   try{const t=localStorage.getItem(LS_PROJECT);if(t){const p=JSON.parse(t);if(!validate(p).length)project=p}}catch(e){}
   const fresh=!project;if(!project)project=blankProject();
   buildFurnGrid();updateUI();setTool('select');
