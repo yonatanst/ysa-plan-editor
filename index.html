@@ -168,6 +168,7 @@ button{touch-action:manipulation;cursor:pointer}
       <button class="tb tog" id="tSnap"><svg viewBox="0 0 24 24"><path d="M6 3v8a6 6 0 0 0 12 0V3h-4v8a2 2 0 0 1-4 0V3z"/><path d="M6 7h4M14 7h4"/></svg>הצמדה</button>
       <button class="tb tog" id="tRound"><span class="big">5</span>עיגול ס"מ</button>
       <button class="tb tog" id="tJoin"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span id="tJoinL">מחובר</span></button>
+      <button class="tb tog" id="tOrtho"><svg viewBox="0 0 24 24"><path d="M5 4v15h15" stroke-width="2.6"/><path d="M5 13h6v6"/></svg>אורתוגונלי</button>
       <button class="tb tog lock" id="tLock"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path id="tLockArc" d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span id="tLockL">נעילה</span></button>
       <button class="tb tog" id="tFinger"><svg viewBox="0 0 24 24"><path d="M9 11V5a1.5 1.5 0 0 1 3 0v5m0-1a1.5 1.5 0 0 1 3 0v2m0-1a1.5 1.5 0 0 1 3 0v4a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-3l-2.5-4.5a1.5 1.5 0 0 1 2.6-1.5L9 15"/></svg>אצבע מציירת</button>
     </nav>
@@ -338,7 +339,7 @@ const cv=$('#cv'), ctx=cv.getContext('2d'), stage=$('#stage');
 let project=null, curFloorId=null;
 let view={s:0.6,ox:40,oy:40};
 let settings={snap:true,round5:true,fingerDraws:true,wallHeight:280,wallType:DEFAULT_WALL,fixedEnd:'start',
-  joinWalls:true,lineColor:'#e53935',lineWidth:2,areaColor:'#1e88e5',panelMini:false};
+  joinWalls:true,ortho:true,lineColor:'#e53935',lineWidth:2,areaColor:'#1e88e5',panelMini:false};
 let tool='select', sel=null, pendingFurn=null;
 let chain=null;      // {first, last, points?} while drawing walls / lines / areas
 let preview=null;    // {p, kind, align} snapped preview point
@@ -602,24 +603,33 @@ function attachT(g){
           if(dist(o,e.s)<=tol||dist(o,e.e)<=tol)continue;
           const q=closestOnSeg(o,e.s,e.e);if(q.t<=0||q.t>=1||dist(q,o)>tol)continue;
           const rx=o.x-e.s.x,ry=o.y-e.s.y,a=rx*u0.x+ry*u0.y,off=-rx*u0.y+ry*u0.x;
+          if(settings.ortho&&Math.abs(cross(u0,u1))<1e-6){
+            // host kept its direction: the stem end follows only the sideways move, and an along move only when the whole host slid
+            const dS={x:w.start.x-e.s.x,y:w.start.y-e.s.y},dE={x:w.end.x-e.e.x,y:w.end.y-e.e.y},n0={x:-u0.y,y:u0.x};
+            const pm=dS.x*n0.x+dS.y*n0.y,aS=dS.x*u0.x+dS.y*u0.y,aE=dE.x*u0.x+dE.y*u0.y,am=Math.abs(aS-aE)<1e-6?aS:0;
+            setEnd(f,k,{x:o.x+n0.x*pm+u0.x*am,y:o.y+n0.y*pm+u0.y*am});changed=true;continue}
           const a1=sM&&!eM?L1-(L0-a):!sM&&eM?a:a*L1/L0;
           setEnd(f,k,{x:w.start.x+u1.x*a1-u1.y*off,y:w.start.y+u1.y*a1+u1.x*off});changed=true}}}
     if(!changed)break}
 }
-// Stretch: move point q by d. Walls parallel to d stretch; other walls translate and pass d on to their far end.
+// Stretch: move junction q by d, and no wall ever changes direction. Each wall at q takes d at that end;
+// the part of d along the wall stretches it, the part across it translates the whole wall and moves on to its far junction.
+// Used for a typed length, and for every drag while the orthogonal lock is on.
 function stretch(g,seeds){
-  const visited=[],queue=seeds.slice(),translated=new Set();
+  const visited=[],queue=seeds.slice(),done=new Set();
   while(queue.length){
     const {q,d,tol}=queue.shift();if(visited.some(v=>dist(v,q)<=tol))continue;visited.push(q);
-    const dl=Math.hypot(d.x,d.y);if(dl<1e-9)continue;
-    for(const [e,k] of endsNear(g,q,tol)){
-      const o=e[k],other=k==='s'?e.e:e.s,v={x:other.x-o.x,y:other.y-o.y},vl=Math.hypot(v.x,v.y)||1;
-      if(Math.abs(cross(v,d))/(vl*dl)<0.02||translated.has(e)){setEnd(e,k,add(o,d));continue}
-      translated.add(e);setEnd(e,k,add(o,d));setEnd(e,k==='s'?'e':'s',add(other,d));
-      queue.push({q:other,d,tol:jt(e.w)});
+    if(Math.hypot(d.x,d.y)<1e-9)continue;
+    for(const [e,k] of endsNear(g,q,tol)){if(done.has(e.w.id+k))continue;done.add(e.w.id+k);
+      const ok=k==='s'?'e':'s',o=e[k],other=e[ok],vl=dist(o,other)||1,u={x:(other.x-o.x)/vl,y:(other.y-o.y)/vl},al=d.x*u.x+d.y*u.y;
+      const dp={x:d.x-u.x*al,y:d.y-u.y*al};setEnd(e,k,add(o,d));
+      if(Math.hypot(dp.x,dp.y)>1e-6&&!done.has(e.w.id+ok)){done.add(e.w.id+ok);setEnd(e,ok,add(other,dp));queue.push({q:other,d:dp,tol:jt(e.w)})}
     }
   }
 }
+// one wall alone (disconnected), same rule: the end takes d, the other end only the part across the wall
+function orthoOwn(e,k,d){const ok=k==='s'?'e':'s',o=e[k],other=e[ok],vl=dist(o,other)||1,u={x:(other.x-o.x)/vl,y:(other.y-o.y)/vl},al=d.x*u.x+d.y*u.y;
+  setEnd(e,k,add(o,d));setEnd(e,ok,add(other,{x:d.x-u.x*al,y:d.y-u.y*al}))}
 // Openings on the edited (primary) wall keep their distance from the wall start.
 // A neighbour stretched only at its start keeps its openings where they are (distance from its end).
 function reflow(g,primary){
@@ -653,6 +663,7 @@ function touchesWall(fe,f,e){
 // settings.joinWalls off = "disconnected": only the wall itself moves, its neighbours stay put
 function translateWall(g,ge,d){
   if(!settings.joinWalls){setEnd(ge,'s',add(ge.s,d));setEnd(ge,'e',add(ge.e,d))}
+  else if(settings.ortho){const t=jt(ge.w);stretch(g,[{q:ge.s,d,tol:t},{q:ge.e,d,tol:t}])}  // neighbours keep their direction
   else{const t=jt(ge.w),s0={...ge.s},e0={...ge.e};moveJunction(g,s0,t,d);moveJunction(g,e0,t,d)}
   reflow(g,new Set([ge.w]))}
 function setWallLength(w,L,fixed){
@@ -776,6 +787,18 @@ function isConnected(w,p){
     const q=closestOnSeg(p,o.start,o.end);if(dist(q,p)<=coreT(o)/2+0.5)return true}
   return false;
 }
+// How far the drawn wall runs past its location-line end. A corner ends flush with the neighbour's outer face
+// (so a thick wall never sticks out past a thin one), a T stem ends on the host's near face, a free end stops at the point.
+function endExt(w,k){
+  const G=wg(w),p=k==='s'?w.start:w.end,dir=k==='s'?{x:-G.ux,y:-G.uy}:{x:G.ux,y:G.uy};let corner=null,tee=null;
+  for(const o of walls()){if(o===w)continue;const Go=wg(o),uo={x:Go.ux,y:Go.uy},tol=Math.max(jt(w),jt(o));
+    const atEnd=dist(o.start,p)<=tol||dist(o.end,p)<=tol;let onBody=false;
+    if(!atEnd){const q=closestOnSeg(p,o.start,o.end);onBody=q.t>0&&q.t<1&&dist(q,p)<=jt(o)}
+    if(!atEnd&&!onBody)continue;const den=cross(dir,uo);if(Math.abs(den)<0.1)continue;  // collinear: the two just abut
+    const A={x:o.start.x-p.x,y:o.start.y-p.y},s=cross(A,uo)/den,hw=(Go.t/2)/Math.abs(den);
+    if(atEnd)corner=Math.max(corner==null?-Infinity:corner,s+hw);else tee=Math.max(tee==null?-Infinity:tee,s-hw)}
+  return clamp(corner!=null?corner:tee!=null?tee:0,-200,200);
+}
 function draw(c,V,W,H,DPR,print){
   const S=V.s;
   c.setTransform(DPR,0,0,DPR,0,0);c.fillStyle='#fff';c.fillRect(0,0,W,H);
@@ -812,7 +835,7 @@ function draw(c,V,W,H,DPR,print){
   const wallPath=(w)=>{
     const G=wg(w),L=G.L,ops=(opsByWall.get(String(w.id))||[]).map(x=>[x.o.position*L-x.o.width/2,x.o.position*L+x.o.width/2]).sort((a,b)=>a[0]-b[0]);
     const segs=[];let cur=0;for(const [a,b] of ops){if(a>cur)segs.push([cur,a]);cur=Math.max(cur,b)}if(cur<L)segs.push([cur,L]);
-    const exS=isConnected(w,w.start)?G.t/2:0,exE=isConnected(w,w.end)?G.t/2:0;
+    const exS=endExt(w,'s'),exE=endExt(w,'e');
     for(let [a,b] of segs){if(a<=0)a=-exS;if(b>=L)b=L+exE;
       const P=t=>({x:w.start.x+G.ux*t,y:w.start.y+G.uy*t});const A=P(a),B=P(b),hx=G.nx*G.t/2,hy=G.ny*G.t/2;
       c.moveTo(A.x+hx,A.y+hy);c.lineTo(B.x+hx,B.y+hy);c.lineTo(B.x-hx,B.y-hy);c.lineTo(A.x-hx,A.y-hy);c.closePath()}
@@ -1171,8 +1194,11 @@ function dragHandle(g,h,wp){
   if(h.owner==='wall'){const ge=g.geom.walls.find(x=>x.w===el),k=h.key==='start'?'s':'e',o=ge[k],other=ge[k==='s'?'e':'s'];
     const tol=jt(el),jn=settings.joinWalls?endsNear(g.geom,o,tol,ge):[];
     const sharing=new Set([el,...jn.map(([x])=>x.w)]);
-    const s=snap(wp,other,{touch:g.touch,exclude:o,excludeWalls:sharing}),d={x:s.p.x-o.x,y:s.p.y-o.y};
-    setEnd(ge,k,s.p);for(const [x,kk] of jn)setEnd(x,kk,add(x[kk],d));reflow(g.geom,new Set([el]));setHud('אורך: '+fmt(wg(el).L)+' ס"מ')}
+    // orthogonal lock: the end goes where it is dragged, the wall keeps its direction (it stretches and slides sideways)
+    const s=snap(wp,settings.ortho?null:other,{touch:g.touch,exclude:o,excludeWalls:sharing}),d={x:s.p.x-o.x,y:s.p.y-o.y};
+    if(settings.ortho){if(settings.joinWalls)stretch(g.geom,[{q:o,d,tol}]);else orthoOwn(ge,k,d)}
+    else{setEnd(ge,k,s.p);for(const [x,kk] of jn)setEnd(x,kk,add(x[kk],d))}
+    reflow(g.geom,new Set([el]));setHud('אורך: '+fmt(wg(el).L)+' ס"מ')}
   else if(h.owner==='line'){const ge=g.geom.lines.find(x=>x.l===el),o=h.key==='start'?ge.s:ge.e,other=h.key==='start'?ge.e:ge.s;
     const s=snap(wp,other,{touch:g.touch,markup:true,exclude:o});setPt(h.key==='start'?el.start:el.end,s.p);setHud('אורך: '+fmt(dist(el.start,el.end))+' ס"מ')}
   else if(h.owner==='polygon'){const ge=g.geom.polys.find(x=>x.p===el),n=ge.pts.length,o=ge.pts[h.key],prev=ge.pts[(h.key-1+n)%n];
@@ -1560,6 +1586,7 @@ function updateUI(){
   const lk=!!settings.locked;$('#tLock').classList.toggle('on',lk);$('#tLockL').textContent=lk?'נעול':'נעילה';
   $('#tLockArc').setAttribute('d',lk?'M8 11V7a4 4 0 0 1 8 0v4':'M8 11V7a4 4 0 0 1 7.5-2');
   document.querySelectorAll('#tools [data-tool]').forEach(b=>{b.disabled=lk&&b.dataset.tool!=='select'});
+  $('#tOrtho').classList.toggle('on',!!settings.ortho);
   $('#tSnap').classList.toggle('on',settings.snap);$('#tRound').classList.toggle('on',settings.round5);$('#tFinger').classList.toggle('on',settings.fingerDraws);
   const fs=$('#floorSel');if(project.floors.length>1){fs.hidden=false;fs.innerHTML=project.floors.map(f=>'<option value="'+esc(f.id)+'"'+(f===floor()?' selected':'')+'>'+esc(f.name||f.id)+'</option>').join('')}else fs.hidden=true;
 }
@@ -1568,6 +1595,8 @@ document.querySelectorAll('#tools [data-tool]').forEach(b=>b.onclick=()=>setTool
 $('#tSnap').onclick=()=>{settings.snap=!settings.snap;saveNow();updateUI();toast(settings.snap?'הצמדה פעילה: קצוות, קירות, אופקי/אנכי':'הצמדה כבויה')};
 function setJoin(on){settings.joinWalls=on;saveNow();updateUI();refreshPanel();toast(on?'מחובר: קירות בפינה זזים יחד':'מנותק: רק הקיר הנבחר זז')}
 $('#tJoin').onclick=()=>setJoin(!settings.joinWalls);
+$('#tOrtho').onclick=()=>{settings.ortho=!settings.ortho;saveNow();updateUI();
+  toast(settings.ortho?'אורתוגונלי: קירות זזים ונמתחים רק בכיוון שלהם, בלי להפוך לאלכסון':'חופשי: גרירת קצה יכולה ליצור קיר בזווית')};
 $('#tLock').onclick=()=>{settings.locked=!settings.locked;if(settings.locked){setTool('select');closeDimEdit()}saveNow();updateUI();refreshPanel();render();
   toast(settings.locked?'נעול: גרירה רק מזיזה את התצוגה, שום אלמנט לא זז':'פתוח לעריכה')};
 $('#tRound').onclick=()=>{settings.round5=!settings.round5;saveNow();updateUI();toast(settings.round5?'עיגול ל-5 ס"מ פעיל':'עיגול ל-5 ס"מ כבוי')};
