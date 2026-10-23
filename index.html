@@ -46,6 +46,9 @@ button{touch-action:manipulation;cursor:pointer}
 .tb svg{width:26px;height:26px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .tb.on{background:var(--accent-weak);color:var(--accent);font-weight:600}
 .tb.tog.on{background:#e8f3ea;color:var(--ok)}
+.tb.tog.lock.on{background:#fff3e0;color:#a75a00}
+.tb:disabled{opacity:.3}
+#panel.locked .fields,#panel.locked .acts{opacity:.45;pointer-events:none}
 .tb .big{font-size:20px;font-weight:700;line-height:26px}
 .sep{width:1px;background:var(--line);margin:8px 4px;flex:0 0 1px}
 #toolopts{position:absolute;top:10px;right:10px;left:10px;display:none;gap:6px;align-items:center;flex-wrap:wrap;pointer-events:none;z-index:3}
@@ -165,6 +168,7 @@ button{touch-action:manipulation;cursor:pointer}
       <button class="tb tog" id="tSnap"><svg viewBox="0 0 24 24"><path d="M6 3v8a6 6 0 0 0 12 0V3h-4v8a2 2 0 0 1-4 0V3z"/><path d="M6 7h4M14 7h4"/></svg>הצמדה</button>
       <button class="tb tog" id="tRound"><span class="big">5</span>עיגול ס"מ</button>
       <button class="tb tog" id="tJoin"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span id="tJoinL">מחובר</span></button>
+      <button class="tb tog lock" id="tLock"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path id="tLockArc" d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span id="tLockL">נעילה</span></button>
       <button class="tb tog" id="tFinger"><svg viewBox="0 0 24 24"><path d="M9 11V5a1.5 1.5 0 0 1 3 0v5m0-1a1.5 1.5 0 0 1 3 0v2m0-1a1.5 1.5 0 0 1 3 0v4a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-3l-2.5-4.5a1.5 1.5 0 0 1 2.6-1.5L9 15"/></svg>אצבע מציירת</button>
     </nav>
     <div id="stage">
@@ -850,14 +854,14 @@ function draw(c,V,W,H,DPR,print){
   if(s&&sel.kind==='polygon'){const v=s.points||[];for(let i=0;i<v.length;i++){const a=v[i],bb=v[(i+1)%v.length],L=dist(a,bb);if(L*S<40)continue;
     const A=sp(a),B=sp(bb),G=wg({start:a,end:bb});label(c,{x:(A.x+B.x)/2,y:(A.y+B.y)/2},Math.atan2(G.uy,G.ux),fmt(L),shade(s.color||'#1e88e5'),12)}}
   // editable temporary dimensions
-  if(s&&tool==='select'){
+  if(s&&tool==='select'&&!settings.locked){
     const sideN=(a,bb)=>{if(sel.kind!=='door'&&sel.kind!=='window')return null;const w=wallById(s.wallId),G=wg(w);
       const m={x:(w.start.x+w.end.x)/2,y:(w.start.y+w.end.y)/2},sg=((m.x-cen.x)*G.nx+(m.y-cen.y)*G.ny)>=0?-1:1;return{n:{x:G.nx*sg,y:G.ny*sg},off:G.t/2*S+30}};
     for(const td of selTempDims()){const A=sp(td.a),B=sp(td.b);const sn=td.along?sideN():null;
       td.L=editDim(c,A,B,sn?sn.off:0,fmt(td.value),sn?sn.n:null);if(td.L)tempDims.push(td)}
   }
   // handles
-  if(s&&tool==='select')for(const h of handlesOf(s,sel.kind)){const P=sp(h.p);c.beginPath();c.arc(P.x,P.y,h.small?8:11,0,7);c.fillStyle='#fff';c.fill();c.lineWidth=3;c.strokeStyle=h.color||'#1565c0';c.stroke()}
+  if(s&&tool==='select'&&!settings.locked)for(const h of handlesOf(s,sel.kind)){const P=sp(h.p);c.beginPath();c.arc(P.x,P.y,h.small?8:11,0,7);c.fillStyle='#fff';c.fill();c.lineWidth=3;c.strokeStyle=h.color||'#1565c0';c.stroke()}
   // drawing-tool preview
   if(DRAW_TOOLS.has(tool)){
     worldT();
@@ -1100,6 +1104,8 @@ function doPinch(){
 function startSingle(e){
   const p=posOf(e),wp=toW(p),touch=e.pointerType==='touch';
   gest={id:e.pointerId,down:p,downW:wp,touch,moved:false,pre:null,changed:false,target:null,v0:{...view}};
+  // locked: every drag pans, a tap still selects (to read values); nothing can be moved or edited
+  if(settings.locked){gest.hit=hitTest(wp,touch);if(gest.hit&&gest.hit.kind==='handle')gest.hit=null;gest.target='pan';return}
   if(tool==='select'){
     const td=tempDims.find(t=>dist(t.L,p)<(touch?26:18));
     if(td){gest.target='dim';gest.dim=td;return}
@@ -1246,6 +1252,7 @@ dimEdit.addEventListener('blur',()=>{if(dimTarget)applyDimEdit()});
 
 /* ============ UI: tools, panel ============ */
 function setTool(t){
+  if(settings.locked&&t!=='select'){toast('השרטוט נעול. הקש על "נעול" כדי לערוך');return}
   if(!DRAW_TOOLS.has(t)||t!==tool){chain=null;preview=null}
   tool=t;if(t!=='furniture')pendingFurn=null;closeDimEdit();
   document.querySelectorAll('#tools [data-tool]').forEach(b=>b.classList.toggle('on',b.dataset.tool===t));
@@ -1354,7 +1361,7 @@ function refreshPanel(){
     ac=btn('del','מחק','danger');hint='גרור פינה כדי לשנות צורה, או גרור את האזור כדי להזיז.';
   }
   h+='<div class="fields">'+fl+'</div><div class="acts">'+ac+'</div>'+(hint?'<div class="hint">'+hint+'</div>':'');
-  pn.classList.add('show');pn.classList.toggle('mini',!!settings.panelMini);
+  pn.classList.add('show');pn.classList.toggle('mini',!!settings.panelMini);pn.classList.toggle('locked',!!settings.locked);
   // Same element and same controls: patch values in place. Rebuilding the DOM makes iOS reset the strip's scroll.
   const tpl=document.createElement('div');tpl.innerHTML=h;
   const ctl=r=>[...r.querySelectorAll('.fields [data-k],.fields [data-v],.acts [data-a]')];
@@ -1533,6 +1540,9 @@ function updateUI(){
   $('#bUndo').disabled=!undoStack.length;$('#bRedo').disabled=!redoStack.length;$('#bSave').classList.toggle('dirty',isDirty());
   $('#projName').textContent=project.name||'ללא שם';
   $('#tJoin').classList.toggle('on',settings.joinWalls);$('#tJoinL').textContent=settings.joinWalls?'מחובר':'מנותק';
+  const lk=!!settings.locked;$('#tLock').classList.toggle('on',lk);$('#tLockL').textContent=lk?'נעול':'נעילה';
+  $('#tLockArc').setAttribute('d',lk?'M8 11V7a4 4 0 0 1 8 0v4':'M8 11V7a4 4 0 0 1 7.5-2');
+  document.querySelectorAll('#tools [data-tool]').forEach(b=>{b.disabled=lk&&b.dataset.tool!=='select'});
   $('#tSnap').classList.toggle('on',settings.snap);$('#tRound').classList.toggle('on',settings.round5);$('#tFinger').classList.toggle('on',settings.fingerDraws);
   const fs=$('#floorSel');if(project.floors.length>1){fs.hidden=false;fs.innerHTML=project.floors.map(f=>'<option value="'+esc(f.id)+'"'+(f===floor()?' selected':'')+'>'+esc(f.name||f.id)+'</option>').join('')}else fs.hidden=true;
 }
@@ -1541,6 +1551,8 @@ document.querySelectorAll('#tools [data-tool]').forEach(b=>b.onclick=()=>setTool
 $('#tSnap').onclick=()=>{settings.snap=!settings.snap;saveNow();updateUI();toast(settings.snap?'הצמדה פעילה: קצוות, קירות, אופקי/אנכי':'הצמדה כבויה')};
 function setJoin(on){settings.joinWalls=on;saveNow();updateUI();refreshPanel();toast(on?'מחובר: קירות בפינה זזים יחד':'מנותק: רק הקיר הנבחר זז')}
 $('#tJoin').onclick=()=>setJoin(!settings.joinWalls);
+$('#tLock').onclick=()=>{settings.locked=!settings.locked;if(settings.locked){setTool('select');closeDimEdit()}saveNow();updateUI();refreshPanel();render();
+  toast(settings.locked?'נעול: גרירה רק מזיזה את התצוגה, שום אלמנט לא זז':'פתוח לעריכה')};
 $('#tRound').onclick=()=>{settings.round5=!settings.round5;saveNow();updateUI();toast(settings.round5?'עיגול ל-5 ס"מ פעיל':'עיגול ל-5 ס"מ כבוי')};
 $('#tFinger').onclick=()=>{settings.fingerDraws=!settings.fingerDraws;penSeen=true;saveNow();updateUI();toast(settings.fingerDraws?'האצבע משרטטת':'רק העט משרטט; האצבע מזיזה')};
 $('#bUndo').onclick=undo;$('#bRedo').onclick=redo;$('#bFit').onclick=fit;
@@ -1551,7 +1563,7 @@ document.addEventListener('keydown',e=>{
   else if(m&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}
   else if(m&&e.key.toLowerCase()==='s'){e.preventDefault();savePlan()}
   else if(e.key==='Escape'){if(chain)endChain();else{sel=null;refreshPanel();render()}}
-  else if((e.key==='Delete'||e.key==='Backspace')&&sel){e.preventDefault();panelAction('del')}
+  else if((e.key==='Delete'||e.key==='Backspace')&&sel&&!settings.locked){e.preventDefault();panelAction('del')}
   else if(e.key==='Enter'&&chain)endChain();
 });
 window.addEventListener('pagehide',saveNow);
