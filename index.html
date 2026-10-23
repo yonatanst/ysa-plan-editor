@@ -630,8 +630,25 @@ function reflow(g,primary){
     for(const oe of g.opens){const o=oe.o;if(String(o.wallId)!==String(w.id))continue;
       const hw=(o.width||0)/2;let c=fromEnd?L1-(L0-oe.pos*L0):oe.pos*L0;c=L1>=2*hw?clamp(c,hw,L1-hw):L1/2;
       const np=L1>0?r8(c/L1):0.5;if(o.position!==np)o.position=np}
-    for(const fe of g.furn){const f=fe.f;if(String(f.hostWallId)!==String(w.id))continue;
-      const c=hostCoords(fe,e.s,e.e);placeOn(f,w,fromEnd?L1-(L0-c.along):c.along,c.sd)}}
+    // furniture rides on its wall like an opening: same distance along it, same offset from it, turned with it.
+    // An item that only touches the wall (placed before hosting existed, or from Revit on the finish face) joins it here.
+    const u0={x:(e.e.x-e.s.x)/(L0||1),y:(e.e.y-e.s.y)/(L0||1)},u1={x:(w.end.x-w.start.x)/(L1||1),y:(w.end.y-w.start.y)/(L1||1)};
+    const dA=(Math.atan2(u1.y,u1.x)-Math.atan2(u0.y,u0.x))*180/Math.PI;
+    for(const fe of g.furn){const f=fe.f;
+      if(String(f.hostWallId)!==String(w.id)){if(!hostable(f)||hostOf(f)||!touchesWall(fe,f,e))continue;f.hostWallId=w.id}
+      const rx=fe.x-e.s.x,ry=fe.y-e.s.y,a=rx*u0.x+ry*u0.y,off=-rx*u0.y+ry*u0.x,a1=clamp(fromEnd?L1-(L0-a):a,0,L1);
+      f.position.x=r2(w.start.x+u1.x*a1-u1.y*off);f.position.y=r2(w.start.y+u1.y*a1+u1.x*off);
+      if(Math.abs(dA)>1e-9){let r=Math.round(((((fe.rot||0)+dA)%360)+360)%360*100)/100;if(r>=360)r=0;f.rotation=r}}}
+}
+// does the item's back lie on wall e (original geometry), between its core face and its finish face?
+function touchesWall(fe,f,e){
+  const z=furnSize(f),b=backLocal(f),h=b.x?z.w/2:z.d/2,mx=(f.scale&&f.scale.x<0)?-1:1,my=(f.scale&&f.scale.y<0)?-1:1;
+  const r=(fe.rot||0)*Math.PI/180,c=Math.cos(r),s=Math.sin(r),vx=b.x*mx,vy=b.y*my,bw={x:vx*c-vy*s,y:vx*s+vy*c};
+  const L0=dist(e.s,e.e);if(L0<1e-6)return false;const u={x:(e.e.x-e.s.x)/L0,y:(e.e.y-e.s.y)/L0},n={x:-u.y,y:u.x};
+  const P={x:fe.x+bw.x*h-e.s.x,y:fe.y+bw.y*h-e.s.y},along=P.x*u.x+P.y*u.y,perp=P.x*n.x+P.y*n.y,sd=perp>=0?1:-1;
+  if(along<-5||along>L0+5||(bw.x*n.x+bw.y*n.y)*sd>-0.999)return false;
+  const core=coreT(e.w),gap=Math.abs(perp)-core/2,fin=Math.max(0,((e.w.thickness||core)-core)/2);
+  return gap>=-1&&gap<=fin+3;
 }
 // settings.joinWalls off = "disconnected": only the wall itself moves, its neighbours stay put
 function translateWall(g,ge,d){
