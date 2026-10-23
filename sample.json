@@ -1,0 +1,372 @@
+{
+  "id": "ysa-sample-apt",
+  "name": "דירה לדוגמה",
+  "description": "sample with revitIds",
+  "revitDocument": "Sample_Project_R25.rvt",
+  "activeFloorId": "L1",
+  "createdAt": "2026-10-23T00:00:00.000Z",
+  "updatedAt": "2026-10-23T00:00:00.000Z",
+  "floors": [
+    {
+      "id": "L1",
+      "name": "קומה 1",
+      "level": 0,
+      "elevation": 0,
+      "revitId": 311,
+      "revitLevelName": "Level 1",
+      "walls": [
+        {
+          "id": "w-north",
+          "revitId": 400101,
+          "revitUniqueId": "a1f3c2d4-0000-4b2e-9f00-000000400101",
+          "start": {
+            "x": 0,
+            "y": 0
+          },
+          "end": {
+            "x": 900,
+            "y": 0
+          },
+          "thickness": 25,
+          "height": 280,
+          "color": "#444444",
+          "wallType": "קיר חוץ 25",
+          "revit": {
+            "typeId": 4125,
+            "baseConstraint": "Level 1",
+            "topOffset": 0,
+            "structural": true
+          }
+        },
+        {
+          "id": "w-east",
+          "revitId": 400102,
+          "revitUniqueId": "a1f3c2d4-0000-4b2e-9f00-000000400102",
+          "start": {
+            "x": 900,
+            "y": 0
+          },
+          "end": {
+            "x": 900,
+            "y": 600
+          },
+          "thickness": 25,
+          "height": 280,
+          "color": "#444444",
+          "wallType": "קיר חוץ 25",
+          "revit": {
+            "typeId": 4125,
+            "baseConstraint": "Level 1",
+            "topOffset": 0,
+            "structural": true
+          }
+        },
+        {
+          "id": "w-south",
+          "revitId": 400103,
+          "revitUniqueId": "a1f3c2d4-0000-4b2e-9f00-000000400103",
+          "start": {
+            "x": 900,
+            "y": 600
+          },
+          "end": {
+            "x": 0,
+            "y": 600
+          },
+          "thickness": 25,
+          "height": 280,
+          "color": "#444444",
+          "wallType": "קיר חוץ 25",
+          "revit": {
+            "typeId": 4125,
+            "baseConstraint": "Level 1",
+            "topOffset": 0,
+            "structural": true
+          }
+        },
+        {
+          "id": "w-west",
+          "revitId": 400104,
+          "revitUniqueId": "a1f3c2d4-0000-4b2e-9f00-000000400104",
+          "start": {
+            "x": 0,
+            "y": 600
+          },
+          "end": {
+            "x": 0,
+            "y": 0
+          },
+          "thickness": 25,
+          "height": 280,
+          "color": "#444444",
+          "wallType": "קיר חוץ 25",
+          "revit": {
+            "typeId": 4125,
+            "baseConstraint": "Level 1",
+            "topOffset": 0,
+            "structural": true
+          }
+        },
+        {
+          "id": "w-part",
+          "revitId": 400105,
+          "revitUniqueId": "a1f3c2d4-0000-4b2e-9f00-000000400105",
+          "start": {
+            "x": 520,
+            "y": 0
+          },
+          "end": {
+            "x": 520,
+            "y": 600
+          },
+          "thickness": 12,
+          "height": 280,
+          "color": "#444444",
+          "wallType": "בלוק פנים 12",
+          "revit": {
+            "typeId": 4112,
+            "baseConstraint": "Level 1",
+            "topOffset": 0,
+            "structural": false
+          }
+        },
+        {
+          "id": "w-bath",
+          "revitId": 400106,
+          "revitUniqueId": "a1f3c2d4-0000-4b2e-9f00-000000400106",
+          "start": {
+            "x": 520,
+            "y": 380
+          },
+          "end": {
+            "x": 900,
+            "y": 380
+          },
+          "thickness": 10,
+          "height": 280,
+          "color": "#444444",
+          "wallType": "בלוק פנים 10",
+          "revit": {
+            "typeId": 4110,
+            "baseConstraint": "Level 1",
+            "topOffset": 0,
+            "structural": false
+          }
+        }
+      ],
+      "doors": [
+        {
+          "id": "d-entry",
+          "revitId": 400201,
+          "wallId": "w-south",
+          "position": 0.75,
+          "width": 100,
+          "height": 210,
+          "type": "single",
+          "swingDirection": "left",
+          "flipSide": false,
+          "revitFamily": "M_Door-Entry 100x210",
+          "revitMark": "D1"
+        },
+        {
+          "id": "d-bed",
+          "revitId": 400202,
+          "wallId": "w-part",
+          "position": 0.3,
+          "width": 80,
+          "height": 210,
+          "type": "single",
+          "swingDirection": "right",
+          "flipSide": true,
+          "revitFamily": "M_Single-Flush 80x210"
+        },
+        {
+          "id": "d-bath",
+          "revitId": 400203,
+          "wallId": "w-bath",
+          "position": 0.2,
+          "width": 70,
+          "height": 210,
+          "type": "sliding",
+          "swingDirection": "left",
+          "flipSide": false
+        }
+      ],
+      "windows": [
+        {
+          "id": "win-living",
+          "revitId": 400301,
+          "wallId": "w-north",
+          "position": 0.3,
+          "width": 160,
+          "height": 140,
+          "sillHeight": 90,
+          "type": "sliding",
+          "revitFamily": "M_Window-Sliding 160x140",
+          "revitMark": "W1"
+        },
+        {
+          "id": "win-bed",
+          "revitId": 400302,
+          "wallId": "w-east",
+          "position": 0.32,
+          "width": 120,
+          "height": 120,
+          "sillHeight": 100,
+          "type": "standard"
+        },
+        {
+          "id": "win-bath",
+          "revitId": 400303,
+          "wallId": "w-east",
+          "position": 0.82,
+          "width": 60,
+          "height": 60,
+          "sillHeight": 160,
+          "type": "fixed"
+        }
+      ],
+      "furniture": [
+        {
+          "id": "f-sofa",
+          "revitId": 400401,
+          "catalogId": "sofa",
+          "position": {
+            "x": 260,
+            "y": 110
+          },
+          "rotation": 0,
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          },
+          "revitFamily": "Sofa-3 Seat"
+        },
+        {
+          "id": "f-table",
+          "revitId": 400402,
+          "catalogId": "dining_table",
+          "position": {
+            "x": 260,
+            "y": 420
+          },
+          "rotation": 0,
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          },
+          "width": 160,
+          "depth": 90
+        },
+        {
+          "id": "f-bed",
+          "revitId": 400403,
+          "catalogId": "bed_queen",
+          "position": {
+            "x": 717.5,
+            "y": 120
+          },
+          "rotation": 0,
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          },
+          "width": 200,
+          "depth": 160
+        },
+        {
+          "id": "f-toilet",
+          "revitId": 400404,
+          "catalogId": "toilet",
+          "position": {
+            "x": 600,
+            "y": 552.5
+          },
+          "rotation": 180,
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        },
+        {
+          "id": "f-shower",
+          "revitId": 400405,
+          "catalogId": "shower",
+          "position": {
+            "x": 837.5,
+            "y": 532.5
+          },
+          "rotation": 0,
+          "scale": {
+            "x": 1,
+            "y": 1,
+            "z": 1
+          }
+        }
+      ],
+      "rooms": [
+        {
+          "id": "r-living",
+          "revitId": 400501,
+          "name": "סלון",
+          "walls": [
+            "w-north",
+            "w-west",
+            "w-south",
+            "w-part"
+          ],
+          "floorTexture": "porcelain",
+          "area": 31.2,
+          "roomType": "indoor",
+          "revitNumber": "101"
+        },
+        {
+          "id": "r-bed",
+          "revitId": 400502,
+          "name": "חדר שינה",
+          "walls": [
+            "w-north",
+            "w-east",
+            "w-bath",
+            "w-part"
+          ],
+          "floorTexture": "light-oak",
+          "area": 14.44,
+          "roomType": "indoor",
+          "revitNumber": "102"
+        }
+      ],
+      "stairs": [],
+      "columns": [
+        {
+          "id": "c-1",
+          "revitId": 400601,
+          "position": {
+            "x": 520,
+            "y": 0
+          },
+          "diameter": 30,
+          "height": 280,
+          "shape": "square",
+          "rotation": 0,
+          "color": "#cccccc"
+        }
+      ],
+      "guides": [],
+      "measurements": [],
+      "annotations": [],
+      "textAnnotations": [],
+      "groups": []
+    }
+  ],
+  "revitExport": {
+    "exportedBy": "ysa-bot",
+    "exportedAt": "2026-10-23T12:00:00Z",
+    "units": "cm",
+    "schema": 1
+  }
+}
