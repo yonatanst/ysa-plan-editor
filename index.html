@@ -155,6 +155,7 @@ button{touch-action:manipulation;cursor:pointer}
       <div class="sep"></div>
       <button class="tb tog" id="tSnap"><svg viewBox="0 0 24 24"><path d="M6 3v8a6 6 0 0 0 12 0V3h-4v8a2 2 0 0 1-4 0V3z"/><path d="M6 7h4M14 7h4"/></svg>הצמדה</button>
       <button class="tb tog" id="tRound"><span class="big">5</span>עיגול ס"מ</button>
+      <button class="tb tog" id="tJoin"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span id="tJoinL">מחובר</span></button>
       <button class="tb tog" id="tFinger"><svg viewBox="0 0 24 24"><path d="M9 11V5a1.5 1.5 0 0 1 3 0v5m0-1a1.5 1.5 0 0 1 3 0v2m0-1a1.5 1.5 0 0 1 3 0v4a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-3l-2.5-4.5a1.5 1.5 0 0 1 2.6-1.5L9 15"/></svg>אצבע מציירת</button>
     </nav>
     <div id="stage">
@@ -267,7 +268,7 @@ const cv=$('#cv'), ctx=cv.getContext('2d'), stage=$('#stage');
 let project=null, curFloorId=null;
 let view={s:0.6,ox:40,oy:40};
 let settings={snap:true,round5:true,fingerDraws:true,wallThickness:20,wallHeight:280,wallType:'קיר חוץ 20',fixedEnd:'start',
-  dimMode:'face',lineColor:'#e53935',lineWidth:2,areaColor:'#1e88e5',panelMini:false};
+  joinWalls:true,dimMode:'face',lineColor:'#e53935',lineWidth:2,areaColor:'#1e88e5',panelMini:false};
 let tool='select', sel=null, pendingFurn=null;
 let chain=null;      // {first, last, points?} while drawing walls / lines / areas
 let preview=null;    // {p, kind, align} snapped preview point
@@ -517,11 +518,20 @@ function reflow(g,primary){
       const hw=(o.width||0)/2;let c=fromEnd?L1-(L0-oe.pos*L0):oe.pos*L0;c=L1>=2*hw?clamp(c,hw,L1-hw):L1/2;
       const np=L1>0?r8(c/L1):0.5;if(o.position!==np)o.position=np}}
 }
-function translateWall(g,ge,d){movePoint(g,ge.s,add(ge.s,d));movePoint(g,ge.e,add(ge.e,d));followT(g,ge,d);reflow(g,new Set([ge.w]))}
+// settings.joinWalls off = "disconnected": only the wall itself moves, its neighbours stay put
+function translateWall(g,ge,d){
+  if(!settings.joinWalls){setEnd(ge,'s',add(ge.s,d));setEnd(ge,'e',add(ge.e,d))}
+  else{movePoint(g,ge.s,add(ge.s,d));movePoint(g,ge.e,add(ge.e,d));followT(g,ge,d)}
+  reflow(g,new Set([ge.w]))}
 function setWallLength(w,L,fixed){
   const g=beginGeom(),e=g.walls.find(x=>x.w===w),G=wg(w),dL=L-G.L;if(Math.abs(dL)<1e-9)return;
   const d=f=>({x:G.ux*dL*f,y:G.uy*dL*f});
-  if(fixed==='end')stretch(g,[{q:e.s,d:d(-1)}]);
+  if(!settings.joinWalls){
+    if(fixed==='end')setEnd(e,'s',add(e.s,d(-1)));
+    else if(fixed==='center'){setEnd(e,'e',add(e.e,d(.5)));setEnd(e,'s',add(e.s,d(-.5)))}
+    else setEnd(e,'e',add(e.e,d(1)));
+  }
+  else if(fixed==='end')stretch(g,[{q:e.s,d:d(-1)}]);
   else if(fixed==='center')stretch(g,[{q:e.e,d:d(.5)},{q:e.s,d:d(-.5)}]);
   else stretch(g,[{q:e.e,d:d(1)}]);
   reflow(g,new Set([w]));
@@ -1012,9 +1022,9 @@ function singleMove(e){
 function dragHandle(g,h,wp){
   const el=h.el;
   if(h.owner==='wall'){const ge=g.geom.walls.find(x=>x.w===el),k=h.key==='start'?'s':'e',o=ge[k],other=ge[k==='s'?'e':'s'];
-    const sharing=new Set(g.geom.walls.filter(x=>near(x.s,o,0.5)||near(x.e,o,0.5)).map(x=>x.w));
+    const sharing=settings.joinWalls?new Set(g.geom.walls.filter(x=>near(x.s,o,0.5)||near(x.e,o,0.5)).map(x=>x.w)):new Set([el]);
     const s=snap(wp,other,{touch:g.touch,exclude:o,excludeWalls:sharing});
-    movePoint(g.geom,o,s.p);reflow(g.geom,new Set([el]));setHud('אורך: '+fmt(wg(el).L)+' ס"מ')}
+    if(settings.joinWalls)movePoint(g.geom,o,s.p);else setEnd(ge,k,s.p);reflow(g.geom,new Set([el]));setHud('אורך: '+fmt(wg(el).L)+' ס"מ')}
   else if(h.owner==='line'){const ge=g.geom.lines.find(x=>x.l===el),o=h.key==='start'?ge.s:ge.e,other=h.key==='start'?ge.e:ge.s;
     const s=snap(wp,other,{touch:g.touch,markup:true,exclude:o});setPt(h.key==='start'?el.start:el.end,s.p);setHud('אורך: '+fmt(dist(el.start,el.end))+' ס"מ')}
   else if(h.owner==='polygon'){const ge=g.geom.polys.find(x=>x.p===el),n=ge.pts.length,o=ge.pts[h.key],prev=ge.pts[(h.key-1+n)%n];
@@ -1175,7 +1185,7 @@ function refreshPanel(){
     fl+=F.num('אורך','len',fmt(G.L))+F.seg('קצה קבוע','fixed',[['start','התחלה'],['center','אמצע'],['end','סוף']],settings.fixedEnd)+
       F.num('עובי','thickness',el.thickness)+F.num('גובה','height',el.height!=null?el.height:Math.max(el.startHeight!=null?el.startHeight:280,el.endHeight!=null?el.endHeight:280));
     const types=[['','— ללא —']].concat(WALL_TYPES.map(w=>[w.name,w.name]));if(el.wallType&&!WALL_TYPES.some(w=>w.name===el.wallType))types.push([el.wallType,el.wallType]);types.push(['__other','אחר…']);
-    fl+=F.sel('סוג קיר','wallType',types,el.wallType||'')+dimSeg();
+    fl+=F.sel('סוג קיר','wallType',types,el.wallType||'')+F.seg('פינות','join',[['1','מחובר'],['0','מנותק']],settings.joinWalls?'1':'0')+dimSeg();
     ac=btn('addDoor','+ דלת')+btn('addWin','+ חלון')+btn('flip','היפוך כיוון')+btn('del','מחק','danger');
     hint='כל המידות בס"מ. הקש על מספר ירוק כדי להזיז את הקיר. קירות מחוברים זזים איתו; דלתות וחלונות שומרים את המרחק מתחילת הקיר.';
   }else if(k==='door'||k==='window'){const w=wallById(el.wallId);
@@ -1262,6 +1272,7 @@ function applyField(k,raw){
 function applySeg(g,v){
   if(g==='fixed'){settings.fixedEnd=v;saveNow();refreshPanel();return}
   if(g==='dimmode'){settings.dimMode=v;saveNow();refreshPanel();render();return}
+  if(g==='join'){setJoin(v==='1');return}
   const el=getSel();if(!el)return;
   if(g==='swing')commit(()=>{if((el.swingDirection||'left')===v)return false;el.swingDirection=v});
   if(g==='flip')commit(()=>{const f=v==='1';if(!!el.flipSide===f)return false;el.flipSide=f});
@@ -1341,12 +1352,15 @@ let toastT=null;function toast(t){const e=$('#toast');e.textContent=t;e.classLis
 function updateUI(){
   $('#bUndo').disabled=!undoStack.length;$('#bRedo').disabled=!redoStack.length;
   $('#projName').textContent=project.name||'ללא שם';
+  $('#tJoin').classList.toggle('on',settings.joinWalls);$('#tJoinL').textContent=settings.joinWalls?'מחובר':'מנותק';
   $('#tSnap').classList.toggle('on',settings.snap);$('#tRound').classList.toggle('on',settings.round5);$('#tFinger').classList.toggle('on',settings.fingerDraws);
   const fs=$('#floorSel');if(project.floors.length>1){fs.hidden=false;fs.innerHTML=project.floors.map(f=>'<option value="'+esc(f.id)+'"'+(f===floor()?' selected':'')+'>'+esc(f.name||f.id)+'</option>').join('')}else fs.hidden=true;
 }
 $('#floorSel').onchange=e=>{curFloorId=e.target.value;sel=null;chain=null;refreshPanel();saveNow();fit()};
 document.querySelectorAll('#tools [data-tool]').forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
 $('#tSnap').onclick=()=>{settings.snap=!settings.snap;saveNow();updateUI();toast(settings.snap?'הצמדה פעילה: קצוות, קירות, אופקי/אנכי':'הצמדה כבויה')};
+function setJoin(on){settings.joinWalls=on;saveNow();updateUI();refreshPanel();toast(on?'מחובר: קירות בפינה זזים יחד':'מנותק: רק הקיר הנבחר זז')}
+$('#tJoin').onclick=()=>setJoin(!settings.joinWalls);
 $('#tRound').onclick=()=>{settings.round5=!settings.round5;saveNow();updateUI();toast(settings.round5?'עיגול ל-5 ס"מ פעיל':'עיגול ל-5 ס"מ כבוי')};
 $('#tFinger').onclick=()=>{settings.fingerDraws=!settings.fingerDraws;penSeen=true;saveNow();updateUI();toast(settings.fingerDraws?'האצבע משרטטת':'רק העט משרטט; האצבע מזיזה')};
 $('#bUndo').onclick=undo;$('#bRedo').onclick=redo;$('#bFit').onclick=fit;
