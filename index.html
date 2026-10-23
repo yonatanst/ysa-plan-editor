@@ -1219,7 +1219,23 @@ function refreshPanel(){
     ac=btn('del','מחק','danger');hint='גרור פינה כדי לשנות צורה, או גרור את האזור כדי להזיז.';
   }
   h+='<div class="fields">'+fl+'</div><div class="acts">'+ac+'</div>'+(hint?'<div class="hint">'+hint+'</div>':'');
-  pn.innerHTML=h;pn.classList.add('show');pn.classList.toggle('mini',!!settings.panelMini);pn.dataset.for=key;
+  pn.classList.add('show');pn.classList.toggle('mini',!!settings.panelMini);
+  // Same element and same controls: patch values in place. Rebuilding the DOM makes iOS reset the strip's scroll.
+  const tpl=document.createElement('div');tpl.innerHTML=h;
+  const ctl=r=>[...r.querySelectorAll('.fields [data-k],.fields [data-v],.acts [data-a]')];
+  const sig=r=>ctl(r).map(e=>[e.tagName,e.dataset.k,e.dataset.v,e.dataset.a].join('|')).join(',');
+  if(keep&&sig(pn)===sig(tpl)){
+    const olds=ctl(pn),news=ctl(tpl);
+    olds.forEach((o,i)=>{const n=news[i];
+      if(o.tagName==='INPUT'){if(document.activeElement!==o&&o.value!==n.getAttribute('value'))o.value=n.getAttribute('value')}
+      else if(o.tagName==='SELECT'){if(o.value!==n.value)o.value=n.value}
+      else if(o.className!==n.className)o.className=n.className});
+    const oi=pn.querySelector('.info'),ni=tpl.querySelector('.info');if(oi&&ni)oi.textContent=ni.textContent;
+    const nph=tpl.querySelector('.ph');pn.querySelector('.ph').replaceWith(nph);
+    nph.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click',()=>panelAction(b.dataset.a)));
+    return;
+  }
+  pn.innerHTML=h;pn.dataset.for=key;
   if(keep){pn.querySelector('.fields').scrollLeft=keep.f;pn.querySelector('.acts').scrollLeft=keep.a;pn.scrollTop=keep.t}
   pn.querySelectorAll('input.num,input.txt').forEach(inp=>{
     inp.addEventListener('change',()=>applyField(inp.dataset.k,inp.value));
