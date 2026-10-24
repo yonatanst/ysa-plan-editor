@@ -305,6 +305,10 @@ const CAT=Object.fromEntries(CATALOG.map(c=>[c.id,c]));
 const CUSTOM=new Set(['living_block','kitchen_u']);
 // Yonatan 23/10: every item hangs on a wall like a door, except the dining table and the living room
 const FREE_FURN=new Set(['dining_table','dining_chair','table','living_block','sofa','loveseat','chair','coffee_table','office_chair']);
+// Yonatan 24/10: a hosted item's back sits on an imaginary line 2.5 cm off the wall's core face
+const FURN_GAP=2.5;
+// Yonatan 24/10: items whose size follows the space get drag handles, like the kitchen
+const RESIZE=new Set(['wardrobe','shower','living_block','dining_table']);
 const LOW_WALL=180;  // cm: a lower wall is below the cut plane, drawn without poché
 // The palette: what can be placed. extra = keys written on the new element.
 const PALETTE=[
@@ -341,6 +345,8 @@ let view={s:0.6,ox:40,oy:40};
 let settings={snap:true,round5:true,fingerDraws:true,wallHeight:280,wallType:DEFAULT_WALL,fixedEnd:'start',
   joinWalls:true,ortho:true,lineColor:'#e53935',lineWidth:2,areaColor:'#1e88e5',panelMini:false};
 let tool='select', sel=null, pendingFurn=null;
+let selVtx=null;     // {id, i}: the area corner tapped last (for "מחק נקודה")
+const vtxSel=()=>{if(!selVtx||!sel||sel.kind!=='polygon'||sel.id!==selVtx.id)return null;const el=getSel();return el&&selVtx.i<(el.points||[]).length?selVtx.i:null};
 let chain=null;      // {first, last, points?} while drawing walls / lines / areas
 let preview=null;    // {p, kind, align} snapped preview point
 let undoStack=[], redoStack=[];
@@ -415,6 +421,9 @@ function setKitchen(f,o,W,L,R,anchor){
   f.position.x=r2(p.x);f.position.y=r2(p.y);f.width=W;f.depth=D;f.leftDepth=L;f.rightDepth=R;
   if(f.sinkAt!=null&&f.sinkAt>W-30)f.sinkAt=Math.max(30,W-30);
 }
+// resize a plain item to W×D (cm, as drawn) with its centre at local (cx,cy) of the original frame; a hosted item stays on its wall
+function resizeFurn(f,frame,W,D,cx,cy){const sx=Math.abs((f.scale&&f.scale.x)||1),sy=Math.abs((f.scale&&f.scale.y)||1),p=frame.toWorld(cx,cy);
+  f.width=r2(W/sx);f.depth=r2(D/sy);f.position.x=r2(p.x);f.position.y=r2(p.y);if(hostOf(f))seatOnHost(f)}
 /* hosted furniture: as in the Revit families, the back sits on the wall's core face and the item slides along the wall.
    Own key hostWallId; position and rotation stay the plain OpenPlan3D values, so a reader that ignores the key still gets the item where it is. */
 const hostable=f=>!FREE_FURN.has(catKey(f));
@@ -426,7 +435,7 @@ function placeOn(f,w,along,sd){
   const G=wg(w),z=furnSize(f),b=backLocal(f),h=b.x?z.w/2:z.d/2;
   const mx=(f.scale&&f.scale.x<0)?-1:1,my=(f.scale&&f.scale.y<0)?-1:1;
   let a=(Math.atan2(-sd*G.ny,-sd*G.nx)-Math.atan2(b.y*my,b.x*mx))*180/Math.PI;a=Math.round((((a%360)+360)%360)*100)/100;if(a>=360)a=0;
-  along=clamp(along,0,G.L);const off=sd*(G.t/2+h);
+  along=clamp(along,0,G.L);const off=sd*(G.t/2+FURN_GAP+h);
   f.position.x=r2(w.start.x+G.ux*along+G.nx*off);f.position.y=r2(w.start.y+G.uy*along+G.ny*off);
   if(f.rotation!==a)f.rotation=a;if(f.hostWallId!==w.id)f.hostWallId=w.id;
 }
@@ -511,6 +520,8 @@ function snap(raw,from,opt){
   if(settings.snap){
     if(markup){
       segs=wallFaces().filter(f=>!exW.has(f.w));
+      // and the wall's middle (an area runs to the middle of a shared wall); its ends are already snap points
+      for(const w of W)if(!exW.has(w))segs.push({a:w.start,b:w.end,w,aReal:false,bReal:false});
       const nearSegs=segs.filter(f=>dist(closestOnSeg(raw,f.a,f.b),raw)<tol*2);
       for(let i=0;i<nearSegs.length;i++){const s=nearSegs[i];if(s.aReal)pts.push(s.a);if(s.bReal)pts.push(s.b);
         for(let j=i+1;j<nearSegs.length;j++){if(nearSegs[j].w===s.w)continue;const q=segInter(s.a,s.b,nearSegs[j].a,nearSegs[j].b);if(q)pts.push(q)}}
@@ -581,7 +592,9 @@ function restoreGeom(g){
   for(const e of g.opens)if(e.o.position!==e.pos)e.o.position=e.pos;
   for(const e of g.furn){setPt(e.f.position,e);if(e.f.rotation!==e.rot){if(e.rot===undefined)delete e.f.rotation;else e.f.rotation=e.rot}}
   for(const e of g.lines){setPt(e.l.start,e.s);setPt(e.l.end,e.e)}
-  for(const e of g.polys)e.pts.forEach((v,i)=>{if(e.p.points[i])setPt(e.p.points[i],v)});
+  // a drag may have added a corner to an area: back to the original count first
+  for(const e of g.polys){if(e.p.points.length!==e.pts.length)e.p.points.length=e.pts.length;
+    e.pts.forEach((v,i)=>{if(e.p.points[i])setPt(e.p.points[i],v);else e.p.points[i]={x:v.x,y:v.y}})}
 }
 function setEnd(e,k,p){setPt(k==='s'?e.w.start:e.w.end,{x:r2(p.x),y:r2(p.y)})}
 // A junction is what the plan draws as one: an end within half the core (+1 cm) of another wall counts as joined,
@@ -630,15 +643,26 @@ function stretch(g,seeds){
 // one wall alone (disconnected), same rule: the end takes d, the other end only the part across the wall
 function orthoOwn(e,k,d){const ok=k==='s'?'e':'s',o=e[k],other=e[ok],vl=dist(o,other)||1,u={x:(other.x-o.x)/vl,y:(other.y-o.y)/vl},al=d.x*u.x+d.y*u.y;
   setEnd(e,k,add(o,d));setEnd(e,ok,add(other,{x:d.x-u.x*al,y:d.y-u.y*al}))}
-// Openings on the edited (primary) wall keep their distance from the wall start.
-// A neighbour stretched only at its start keeps its openings where they are (distance from its end).
-function reflow(g,primary){
+// Where something riding on a wall goes when the wall changes (Yonatan 24/10): lengthening or shortening a wall
+// leaves its doors, windows and furniture where they are; only moving the whole wall carries them along.
+// a = distance from the original start; returns the distance from the new start.
+function rideAlong(e,a){
+  const w=e.w,L0=dist(e.s,e.e),L1=dist(w.start,w.end);if(L0<1e-6||L1<1e-6)return a;
+  const u0={x:(e.e.x-e.s.x)/L0,y:(e.e.y-e.s.y)/L0},u1={x:(w.end.x-w.start.x)/L1,y:(w.end.y-w.start.y)/L1};
+  const dS={x:w.start.x-e.s.x,y:w.start.y-e.s.y},dE={x:w.end.x-e.e.x,y:w.end.y-e.e.y};
+  if(Math.abs(cross(u0,u1))<1e-6&&u0.x*u1.x+u0.y*u1.y>0){
+    // same direction: the item keeps its place on the line, plus only the slide both ends share
+    const aS=dS.x*u0.x+dS.y*u0.y,aE=dE.x*u0.x+dE.y*u0.y,am=Math.abs(aS-aE)<1e-6?aS:0;return a+am-aS}
+  // the wall turned: the item keeps its distance from the end that stayed
+  return Math.hypot(dS.x,dS.y)>1e-9&&Math.hypot(dE.x,dE.y)<=1e-9?L1-(L0-a):a;
+}
+function reflow(g){
   if(settings.joinWalls)attachT(g);
   for(const e of g.walls){const w=e.w;
     const sMoved=!near(e.s,w.start,1e-9),eMoved=!near(e.e,w.end,1e-9);if(!sMoved&&!eMoved)continue;
-    const L0=dist(e.s,e.e),L1=dist(w.start,w.end),fromEnd=sMoved&&!eMoved&&!(primary&&primary.has(w));
+    const L0=dist(e.s,e.e),L1=dist(w.start,w.end);
     for(const oe of g.opens){const o=oe.o;if(String(o.wallId)!==String(w.id))continue;
-      const hw=(o.width||0)/2;let c=fromEnd?L1-(L0-oe.pos*L0):oe.pos*L0;c=L1>=2*hw?clamp(c,hw,L1-hw):L1/2;
+      const hw=(o.width||0)/2;let c=rideAlong(e,oe.pos*L0);c=L1>=2*hw?clamp(c,hw,L1-hw):L1/2;
       const np=L1>0?r8(c/L1):0.5;if(o.position!==np)o.position=np}
     // furniture rides on its wall like an opening: same distance along it, same offset from it, turned with it.
     // An item that only touches the wall (placed before hosting existed, or from Revit on the finish face) joins it here.
@@ -646,7 +670,7 @@ function reflow(g,primary){
     const dA=(Math.atan2(u1.y,u1.x)-Math.atan2(u0.y,u0.x))*180/Math.PI;
     for(const fe of g.furn){const f=fe.f;
       if(String(f.hostWallId)!==String(w.id)){if(!hostable(f)||hostOf(f)||!touchesWall(fe,f,e))continue;f.hostWallId=w.id}
-      const rx=fe.x-e.s.x,ry=fe.y-e.s.y,a=rx*u0.x+ry*u0.y,off=-rx*u0.y+ry*u0.x,a1=clamp(fromEnd?L1-(L0-a):a,0,L1);
+      const rx=fe.x-e.s.x,ry=fe.y-e.s.y,a=rx*u0.x+ry*u0.y,off=-rx*u0.y+ry*u0.x,a1=clamp(rideAlong(e,a),0,L1);
       f.position.x=r2(w.start.x+u1.x*a1-u1.y*off);f.position.y=r2(w.start.y+u1.y*a1+u1.x*off);
       if(Math.abs(dA)>1e-9){let r=Math.round(((((fe.rot||0)+dA)%360)+360)%360*100)/100;if(r>=360)r=0;f.rotation=r}}}
 }
@@ -665,7 +689,7 @@ function translateWall(g,ge,d){
   if(!settings.joinWalls){setEnd(ge,'s',add(ge.s,d));setEnd(ge,'e',add(ge.e,d))}
   else if(settings.ortho){const t=jt(ge.w);stretch(g,[{q:ge.s,d,tol:t},{q:ge.e,d,tol:t}])}  // neighbours keep their direction
   else{const t=jt(ge.w),s0={...ge.s},e0={...ge.e};moveJunction(g,s0,t,d);moveJunction(g,e0,t,d)}
-  reflow(g,new Set([ge.w]))}
+  reflow(g)}
 function setWallLength(w,L,fixed){
   const g=beginGeom(),e=g.walls.find(x=>x.w===w),G=wg(w),dL=L-G.L;if(Math.abs(dL)<1e-9)return;
   const d=f=>({x:G.ux*dL*f,y:G.uy*dL*f});
@@ -678,7 +702,7 @@ function setWallLength(w,L,fixed){
     if(fixed==='end')stretch(g,[{q:e.s,d:d(-1),tol:t}]);
     else if(fixed==='center')stretch(g,[{q:e.e,d:d(.5),tol:t},{q:e.s,d:d(-.5),tol:t}]);
     else stretch(g,[{q:e.e,d:d(1),tol:t}])}
-  reflow(g,new Set([w]));
+  reflow(g);
 }
 const opDist=(o,w)=>o.position*wg(w).L-(o.width||0)/2;  // wall start -> near edge of the opening
 function setOpDist(o,w,edge){const L=wg(w).L,hw=(o.width||0)/2;let c=edge+hw;c=L>=2*hw?clamp(c,hw,L-hw):L/2;o.position=r8(c/L)}
@@ -799,6 +823,47 @@ function endExt(w,k){
     if(atEnd)corner=Math.max(corner==null?-Infinity:corner,s+hw);else tee=Math.max(tee==null?-Infinity:tee,s-hw)}
   return clamp(corner!=null?corner:tee!=null?tee:0,-200,200);
 }
+/* ============ space dimensions ============ */
+const MAX_SPAN=3000;  // cm: a face that sees no wall within this is an outside face
+const extMap=()=>new Map(walls().map(w=>[w,[endExt(w,'s'),endExt(w,'e')]]));
+const mergeIv=iv=>{const m=[];for(const [a,b] of iv.slice().sort((p,q)=>p[0]-q[0])){const l=m[m.length-1];if(l&&a<=l[1]+0.5)l[1]=Math.max(l[1],b);else m.push([a,b])}return m};
+// where the other walls' drawn bodies cross a face line (point F0, unit axis u): intervals along u
+function faceCuts(F0,u,EX){const out=[];
+  for(const q of walls()){const Gq=wg(q),uq={x:Gq.ux,y:Gq.uy},den=cross(u,uq);if(Math.abs(den)<0.1)continue;
+    const A={x:q.start.x-F0.x,y:q.start.y-F0.y},s=cross(A,uq)/den,tq=cross(A,u)/den,ex=EX.get(q);
+    if(tq<-ex[0]-0.5||tq>Gq.L+ex[1]+0.5)continue;const hw=(Gq.t/2)/Math.abs(den);out.push([s-hw,s+hw])}
+  return out}
+// the stretches of [lo,hi] between cuts; sa / sb = that end sits on a crossing wall (not a free end)
+function freeRuns(lo,hi,cuts){const out=[];let pos=lo,bound=false;
+  for(const [k0,k1] of mergeIv(cuts)){if(k1<lo-0.5)continue;if(k0>hi+0.5)break;
+    if(k0>pos+0.5)out.push({a:pos,b:Math.min(k0,hi),sa:bound,sb:true});if(k1>pos){pos=k1;bound=true}}
+  if(hi>pos+0.5)out.push({a:pos,b:hi,sa:bound,sb:false});
+  return out}
+// distance from M along nn to the first wall face it meets
+function rayHit(M,nn,EX){let best=Infinity;
+  for(const o of walls()){const G=wg(o),uo={x:G.ux,y:G.uy},den=cross(nn,uo);if(Math.abs(den)<1e-6)continue;
+    const A={x:o.start.x-M.x,y:o.start.y-M.y},r=cross(A,uo)/den,tq=cross(A,nn)/den,ex=EX.get(o);
+    if(tq<-ex[0]-0.5||tq>G.L+ex[1]+0.5)continue;const rf=r-(G.t/2)/Math.abs(den);if(rf>0.5&&rf<best)best=rf}
+  return best}
+// Every wall face that looks into a space, cut where other walls cross it; collinear walls share one face line.
+// A stretch counts when both its ends sit on crossing walls and a wall stands across from it. Two faces across one space give one dimension.
+function spaceDims(EX){
+  EX=EX||extMap();const groups=new Map(),out=[];
+  for(const w of walls()){const G=wg(w);if(G.L<1)continue;let u={x:G.ux,y:G.uy};if(u.x<-1e-9||(Math.abs(u.x)<=1e-9&&u.y<0))u={x:-u.x,y:-u.y};
+    const pn={x:-u.y,y:u.x},dir=G.ux*u.x+G.uy*u.y>0?1:-1,ex=EX.get(w);
+    const a0=w.start.x*u.x+w.start.y*u.y-dir*ex[0],a1=w.end.x*u.x+w.end.y*u.y+dir*ex[1];
+    for(const sd of [1,-1]){const nx=G.nx*sd,ny=G.ny*sd,off=(w.start.x+nx*G.t/2)*pn.x+(w.start.y+ny*G.t/2)*pn.y,side=nx*pn.x+ny*pn.y>0?1:-1;
+      const key=Math.round(Math.atan2(u.y,u.x)*1e3)+'|'+Math.round(off*2)+'|'+side;
+      let g=groups.get(key);if(!g){g={u,nn:{x:pn.x*side,y:pn.y*side},F0:{x:pn.x*off,y:pn.y*off},walls:[],cov:[]};groups.set(key,g)}
+      g.walls.push(w);g.cov.push([Math.min(a0,a1),Math.max(a0,a1)])}}
+  for(const g of groups.values()){const cuts=faceCuts(g.F0,g.u,EX),P=a=>({x:g.F0.x+g.u.x*a,y:g.F0.y+g.u.y*a});
+    for(const [c0,c1] of mergeIv(g.cov))for(const r of freeRuns(c0,c1,cuts)){if(!r.sa||!r.sb)continue;
+      const M=P((r.a+r.b)/2),D=rayHit(M,g.nn,EX);if(D>MAX_SPAN)continue;
+      const len=r.b-r.a,mid={x:M.x+g.nn.x*D/2,y:M.y+g.nn.y*D/2};
+      if(out.some(o=>Math.abs(o.len-len)<0.5&&dist(o.mid,mid)<2&&Math.abs(cross(o.u,g.u))<1e-3))continue;
+      out.push({a:P(r.a),b:P(r.b),len,nn:g.nn,u:g.u,mid,walls:g.walls})}}
+  return out;
+}
 function draw(c,V,W,H,DPR,print){
   const S=V.s;
   c.setTransform(DPR,0,0,DPR,0,0);c.fillStyle='#fff';c.fillRect(0,0,W,H);
@@ -817,11 +882,6 @@ function draw(c,V,W,H,DPR,print){
   }
   const ws=f.walls||[];
   worldT();
-  // areas (under everything)
-  for(const p of f.markupPolygons||[]){const v=p.points||[];if(v.length<2)continue;const isSel=!print&&sel&&sel.kind==='polygon'&&sel.id===p.id;
-    c.beginPath();c.moveTo(v[0].x,v[0].y);for(let i=1;i<v.length;i++)c.lineTo(v[i].x,v[i].y);c.closePath();
-    c.globalAlpha=p.opacity!=null?p.opacity:0.3;c.fillStyle=p.color||'#1e88e5';c.fill();c.globalAlpha=1;
-    c.lineWidth=(isSel?2.5:1.5)/S;c.strokeStyle=p.color||'#1e88e5';if(isSel)c.setLineDash([8/S,5/S]);c.stroke();c.setLineDash([])}
   // furniture (under walls)
   for(const o of f.furniture||[]){const isSel=!print&&sel&&sel.kind==='furniture'&&sel.id===o.id;drawFurniture(c,o,S,isSel)}
   // stairs, columns
@@ -850,6 +910,11 @@ function draw(c,V,W,H,DPR,print){
   for(const x of openings()){const w=wallById(x.o.wallId);if(!w)continue;
     const isSel=!print&&sel&&sel.kind===x.kind&&sel.id===x.o.id;
     if(x.kind==='door')drawDoor(c,x.o,w,S,isSel);else drawWindow(c,x.o,w,S,isSel)}
+  // areas over walls and furniture, see-through, so a contour on a wall face or a wall's middle stays visible (Yonatan 24/10)
+  for(const p of f.markupPolygons||[]){const v=p.points||[];if(v.length<2)continue;const isSel=!print&&sel&&sel.kind==='polygon'&&sel.id===p.id;
+    c.beginPath();c.moveTo(v[0].x,v[0].y);for(let i=1;i<v.length;i++)c.lineTo(v[i].x,v[i].y);c.closePath();
+    c.globalAlpha=p.opacity!=null?p.opacity:0.3;c.fillStyle=p.color||'#1e88e5';c.fill();c.globalAlpha=1;
+    c.lineWidth=(isSel?2.5:1.5)/S;c.strokeStyle=p.color||'#1e88e5';if(isSel)c.setLineDash([8/S,5/S]);c.stroke();c.setLineDash([])}
   // coloured lines (on top)
   c.lineCap='round';
   for(const l of f.markupLines||[]){const isSel=!print&&sel&&sel.kind==='line'&&sel.id===l.id;
@@ -865,24 +930,26 @@ function draw(c,V,W,H,DPR,print){
   for(const p of f.markupPolygons||[]){const v=p.points||[];if(v.length<3)continue;const C=sp(polyCentroid(v)),a=polyArea(v);
     const col=shade(p.color||'#1e88e5');
     if(p.name){label(c,{x:C.x,y:C.y-9},0,p.name,col,13);label(c,{x:C.x,y:C.y+9},0,a.toFixed(2)+' מ"ר',col,13)}else label(c,C,0,a.toFixed(2)+' מ"ר',col,13)}
-  // wall length labels
+  // dimensions: the clear span of each space, face to face (Yonatan 24/10), never the wall's own length.
+  // The selected wall shows its own chain on one face instead (below), so that face is skipped here.
   const b=planBounds();const cen=b?{x:(b.x0+b.x1)/2,y:(b.y0+b.y1)/2}:{x:0,y:0};
-  for(const w of ws){const G=wg(w);if(G.L*S<34)continue;
-    const m={x:(w.start.x+w.end.x)/2,y:(w.start.y+w.end.y)/2};let sg=((m.x-cen.x)*G.nx+(m.y-cen.y)*G.ny)>=0?1:-1;
-    const M=sp(m),off=G.t/2*S+11;const pos={x:M.x+G.nx*sg*off,y:M.y+G.ny*sg*off};
-    label(c,pos,Math.atan2(G.uy,G.ux),fmt(G.L),(!print&&sel&&sel.kind==='wall'&&sel.id===w.id)?'#1565c0':'#444');
-  }
+  const s=print?null:getSel(),EX=extMap();let wch=null;
+  if(s&&sel.kind==='wall'){const G=wg(s),m={x:(s.start.x+s.end.x)/2,y:(s.start.y+s.end.y)/2},toC=((m.x-cen.x)*G.nx+(m.y-cen.y)*G.ny)>=0?-1:1;
+    // the face that looks into a space; with both or neither, the one toward the plan's middle
+    const sees=k=>rayHit({x:m.x+G.nx*k*G.t/2,y:m.y+G.ny*k*G.t/2},{x:G.nx*k,y:G.ny*k},EX)<=MAX_SPAN,sg=sees(toC)||!sees(-toC)?toC:-toC;
+    wch={w:s,G,nn:{x:G.nx*sg,y:G.ny*sg}}}
+  for(const d of spaceDims(EX)){if(wch&&d.walls.includes(wch.w)&&d.nn.x*wch.nn.x+d.nn.y*wch.nn.y>0)continue;
+    const A=sp(d.a),B=sp(d.b);if(dist(A,B)>=34)dimLine(c,A,B,14,fmt(d.len),'#444',d.nn)}
   if(print)return;
   // selection details
-  const s=getSel();tempDims=[];
-  if(s&&sel.kind==='wall'){const G=wg(s);
-    const m={x:(s.start.x+s.end.x)/2,y:(s.start.y+s.end.y)/2};const sg=((m.x-cen.x)*G.nx+(m.y-cen.y)*G.ny)>=0?-1:1;
-    const ops=(opsByWall.get(String(s.id))||[]).map(x=>x.o).sort((a,b)=>a.position-b.position);
-    const pts=[0];for(const o of ops){pts.push(o.position*G.L-o.width/2,o.position*G.L+o.width/2)}pts.push(G.L);
-    if(ops.length){const off=(G.t/2)*S+30;const n={x:G.nx*sg,y:G.ny*sg};
-      for(let i=0;i<pts.length-1;i++){const a=pts[i],bb=pts[i+1];if(bb-a<0.5)continue;
-        const A=sp({x:s.start.x+G.ux*a,y:s.start.y+G.uy*a}),B=sp({x:s.start.x+G.ux*bb,y:s.start.y+G.uy*bb});
-        dimLine(c,A,B,off,fmt(bb-a),'#1565c0',n)}}
+  tempDims=[];
+  if(wch){const G=wch.G,nn=wch.nn,u={x:G.ux,y:G.uy},F0={x:s.start.x+nn.x*G.t/2,y:s.start.y+nn.y*G.t/2},ex=EX.get(s);
+    // the face from crossing wall to crossing wall, split at the openings
+    const edges=(opsByWall.get(String(s.id))||[]).flatMap(x=>[x.o.position*G.L-x.o.width/2,x.o.position*G.L+x.o.width/2]);
+    for(const r of freeRuns(-ex[0],G.L+ex[1],faceCuts(F0,u,EX))){
+      const pts=[r.a,...edges.filter(t=>t>r.a+0.5&&t<r.b-0.5),r.b].sort((p,q)=>p-q);
+      for(let i=0;i<pts.length-1;i++){if(pts[i+1]-pts[i]<0.5)continue;
+        dimLine(c,sp(add(F0,{x:u.x*pts[i],y:u.y*pts[i]})),sp(add(F0,{x:u.x*pts[i+1],y:u.y*pts[i+1]})),34,fmt(pts[i+1]-pts[i]),'#1565c0',nn)}}
     // name both ends, and pin the point that stays put when the length is typed
     c.font='600 11px -apple-system,Arial';c.fillStyle='#1565c0';c.textAlign='center';c.textBaseline='middle';
     const P0=sp(s.start),P1=sp(s.end),PC={x:(P0.x+P1.x)/2,y:(P0.y+P1.y)/2};c.fillText('התחלה',P0.x,P0.y-22);c.fillText('סוף',P1.x,P1.y-22);
@@ -901,7 +968,10 @@ function draw(c,V,W,H,DPR,print){
       td.L=editDim(c,A,B,sn?sn.off:0,fmt(td.value),sn?sn.n:null);if(td.L)tempDims.push(td)}
   }
   // handles
-  if(s&&tool==='select'&&!settings.locked)for(const h of handlesOf(s,sel.kind)){const P=sp(h.p);c.beginPath();c.arc(P.x,P.y,h.small?8:11,0,7);c.fillStyle='#fff';c.fill();c.lineWidth=3;c.strokeStyle=h.color||'#1565c0';c.stroke()}
+  if(s&&tool==='select'&&!settings.locked){const sv=vtxSel();for(const h of handlesOf(s,sel.kind)){const P=sp(h.p);c.beginPath();
+    if(h.mid){c.arc(P.x,P.y,7,0,7);c.fillStyle='#fff';c.fill();c.lineWidth=1.5;c.strokeStyle=h.color;c.stroke();
+      c.beginPath();c.moveTo(P.x-4,P.y);c.lineTo(P.x+4,P.y);c.moveTo(P.x,P.y-4);c.lineTo(P.x,P.y+4);c.stroke();continue}
+    c.arc(P.x,P.y,h.small?8:11,0,7);c.fillStyle=sv!=null&&h.key===sv?h.color:'#fff';c.fill();c.lineWidth=3;c.strokeStyle=h.color||'#1565c0';c.stroke()}}
   // drawing-tool preview
   if(DRAW_TOOLS.has(tool)){
     worldT();
@@ -1066,7 +1136,13 @@ function furnContains(f,wp,pad){
 }
 function handlesOf(el,kind){
   if(kind==='wall'||kind==='line')return[{p:el.start,key:'start'},{p:el.end,key:'end'}];
-  if(kind==='polygon')return(el.points||[]).map((p,i)=>({p,key:i,small:true,color:shade(el.color||'#1e88e5')}));
+  // an area: its corners, then a "+" in the middle of every side that is long enough on screen (drag or tap it = a new corner)
+  if(kind==='polygon'){const v=el.points||[],col=shade(el.color||'#1e88e5'),hs=v.map((p,i)=>({p,key:i,small:true,color:col}));
+    v.forEach((p,i)=>{const q=v[(i+1)%v.length];if(v.length>1&&dist(p,q)*view.s>=44)hs.push({p:{x:(p.x+q.x)/2,y:(p.y+q.y)/2},key:'m'+i,mid:true,color:col})});return hs}
+  if(kind==='furniture'&&RESIZE.has(catKey(el))){const z=furnSize(el),F=furnFrame(el),X=z.w/2,Y=z.d/2,col='#00897b';
+    const hs=[{p:F.toWorld(-X,0),key:'rWl',color:col},{p:F.toWorld(X,0),key:'rWr',color:col},{p:F.toWorld(0,Y),key:'rDf',color:col}];
+    if(!hostOf(el))hs.push({p:F.toWorld(0,-Y),key:'rDb',color:col});  // a hosted item's back stays on the wall
+    return hs}
   if(kind==='furniture'&&catKey(el)==='kitchen_u'){const k=kParams(el),F=furnFrame(el),X=-k.W/2,Y=-k.D/2,col='#00897b';
     return[{p:F.toWorld(X+k.cd/2,Y+k.L),key:'kL',color:col},{p:F.toWorld(X+k.W-k.cd/2,Y+k.R),key:'kR',color:col},
       {p:F.toWorld(X,Y+k.cd/2),key:'kWl',color:col},{p:F.toWorld(X+k.W,Y+k.cd/2),key:'kWr',color:col}]}
@@ -1153,7 +1229,7 @@ function startSingle(e){
     if(h&&(h.kind==='door'||h.kind==='window')){gest.target='open';const w=wallById(h.el.wallId),G=wg(w);
       gest.grab=((wp.x-w.start.x)*G.ux+(wp.y-w.start.y)*G.uy)-h.el.position*G.L}
     else if(h&&h.kind==='furniture'){gest.target='furn';gest.grab={x:wp.x-h.el.position.x,y:wp.y-h.el.position.y}}
-    else if(h&&h.kind==='handle'){gest.target='handle';if(h.owner==='furniture'){const k=kParams(h.el);gest.korig=Object.assign(k,{frame:furnFrame(h.el)})}}
+    else if(h&&h.kind==='handle'){gest.target='handle';if(h.owner==='furniture'){const k=kParams(h.el);gest.korig=Object.assign(k,{frame:furnFrame(h.el),z:furnSize(h.el)})}}
     else if(h&&sel&&sel.kind===h.kind&&sel.id===h.el.id&&(h.kind==='wall'||h.kind==='line'||h.kind==='polygon'))gest.target='body';
     else gest.target='pan';
   }else if(DRAW_TOOLS.has(tool)){
@@ -1198,11 +1274,21 @@ function dragHandle(g,h,wp){
     const s=snap(wp,settings.ortho?null:other,{touch:g.touch,exclude:o,excludeWalls:sharing}),d={x:s.p.x-o.x,y:s.p.y-o.y};
     if(settings.ortho){if(settings.joinWalls)stretch(g.geom,[{q:o,d,tol}]);else orthoOwn(ge,k,d)}
     else{setEnd(ge,k,s.p);for(const [x,kk] of jn)setEnd(x,kk,add(x[kk],d))}
-    reflow(g.geom,new Set([el]));setHud('אורך: '+fmt(wg(el).L)+' ס"מ')}
+    reflow(g.geom);setHud('אורך: '+fmt(wg(el).L)+' ס"מ')}
   else if(h.owner==='line'){const ge=g.geom.lines.find(x=>x.l===el),o=h.key==='start'?ge.s:ge.e,other=h.key==='start'?ge.e:ge.s;
     const s=snap(wp,other,{touch:g.touch,markup:true,exclude:o});setPt(h.key==='start'?el.start:el.end,s.p);setHud('אורך: '+fmt(dist(el.start,el.end))+' ס"מ')}
-  else if(h.owner==='polygon'){const ge=g.geom.polys.find(x=>x.p===el),n=ge.pts.length,o=ge.pts[h.key],prev=ge.pts[(h.key-1+n)%n];
-    const s=snap(wp,prev,{touch:g.touch,markup:true,exclude:o});setPt(el.points[h.key],s.p);setHud(polyArea(el.points).toFixed(2)+' מ"ר')}
+  else if(h.owner==='polygon'){const ge=g.geom.polys.find(x=>x.p===el),n=ge.pts.length;
+    if(typeof h.key==='string'){const i=+h.key.slice(1),s=snap(wp,ge.pts[i],{touch:g.touch,markup:true});  // a new corner on side i
+      el.points.splice(i+1,0,{x:s.p.x,y:s.p.y});g.newVtx=i+1}
+    else{const o=ge.pts[h.key],prev=ge.pts[(h.key-1+n)%n];const s=snap(wp,prev,{touch:g.touch,markup:true,exclude:o});setPt(el.points[h.key],s.p)}
+    setHud(polyArea(el.points).toFixed(2)+' מ"ר')}
+  else if(h.owner==='furniture'&&h.key[0]==='r'){const o=g.korig,z=o.z,lp=o.frame.toLocal(wp),MIN=30;let W=z.w,D=z.d,cx=0,cy=0;
+    // the side across from the handle stays where it is
+    if(h.key==='rWr'){W=clamp(r5(lp.x+z.w/2),MIN,3000);cx=W/2-z.w/2}
+    if(h.key==='rWl'){W=clamp(r5(z.w/2-lp.x),MIN,3000);cx=z.w/2-W/2}
+    if(h.key==='rDf'){D=clamp(r5(lp.y+z.d/2),MIN,3000);cy=D/2-z.d/2}
+    if(h.key==='rDb'){D=clamp(r5(z.d/2-lp.y),MIN,3000);cy=z.d/2-D/2}
+    resizeFurn(el,o.frame,W,D,cx,cy);setHud(fmt(W)+' × '+fmt(D))}
   else if(h.owner==='furniture'){const o=g.korig,lp=o.frame.toLocal(wp),X0=-o.W/2,Y0=-o.D/2,minW=2*o.cd+20;
     if(h.key==='kL'){const L=clamp(r5(lp.y-Y0),o.cd,2000);setKitchen(el,o,o.W,L,o.R,'none');setHud('רגל שמאל: '+fmt(L))}
     if(h.key==='kR'){const R=clamp(r5(lp.y-Y0),o.cd,2000);setKitchen(el,o,o.W,o.L,R,'none');setHud('רגל ימין: '+fmt(R))}
@@ -1215,7 +1301,8 @@ function singleEnd(e,cancel){
   if(Date.now()-lastPinch<250&&!g.moved)return;
   if(g.moved){
     if(g.target==='draw'&&chain&&preview){commitDraw(chain.last,preview.p);if(e.pointerType==='touch')preview=null;render();return}
-    if(g.changed){pushUndo(g.pre);if(g.hit)sel={kind:g.hit.kind==='handle'?g.hit.owner:g.hit.kind,id:g.hit.el.id};refreshPanel()}
+    if(g.changed){pushUndo(g.pre);if(g.hit)sel={kind:g.hit.kind==='handle'?g.hit.owner:g.hit.kind,id:g.hit.el.id};
+      if(g.newVtx!=null)selVtx={id:g.hit.el.id,i:g.newVtx};refreshPanel()}
     render();return;
   }
   tap(g);
@@ -1224,7 +1311,13 @@ function tap(g){
   const wp=g.downW;
   if(tool==='select'){
     if(g.target==='dim'){openDimEdit(g.dim);return}
-    const h=g.hit,prev=sel&&sel.id;sel=h?{kind:h.kind==='handle'?h.owner:h.kind,id:h.el.id}:null;refreshPanel();render();
+    const h=g.hit,prev=sel&&sel.id;
+    // an area's corner: tap marks it (for "מחק נקודה"); tap a side's "+" = a new corner in its middle
+    if(h&&h.kind==='handle'&&h.owner==='polygon'){const el=h.el;
+      if(typeof h.key==='string'){const i=+h.key.slice(1),v=el.points,q=v[(i+1)%v.length];
+        commit(()=>{v.splice(i+1,0,{x:r2((v[i].x+q.x)/2),y:r2((v[i].y+q.y)/2)})});selVtx={id:el.id,i:i+1}}
+      else selVtx=vtxSel()===h.key?null:{id:el.id,i:h.key};
+      refreshPanel();render();return}sel=h?{kind:h.kind==='handle'?h.owner:h.kind,id:h.el.id}:null;refreshPanel();render();
     if(sel&&sel.id!==prev)ensureVisible();return}
   if(DRAW_TOOLS.has(tool)){
     if(g.target==='pan')return;
@@ -1373,7 +1466,7 @@ function refreshPanel(){
     fl+=F.sel('סוג קיר','wallType',types,wallTypeOf(el)?el.wallType:'')+F.info('ליבה',fmt(coreT(el))+' ס"מ')+
       F.seg('פינות','join',[['1','מחובר'],['0','מנותק']],settings.joinWalls?'1':'0');
     ac=btn('addDoor','+ דלת')+btn('addWin','+ חלון')+btn('flip','היפוך כיוון')+btn('del','מחק','danger');
-    hint='כל המידות בס"מ. הקש על מספר ירוק כדי להזיז את הקיר. קירות מחוברים זזים איתו; דלתות וחלונות שומרים את המרחק מתחילת הקיר.';
+    hint='כל המידות בס"מ. המידות בשרטוט הן מידות החלל, מפני קיר לפני קיר. הקש על מספר ירוק כדי להזיז את הקיר. כשמאריכים קיר דלתות, חלונות וריהוט נשארים במקום; הם זזים רק כשמזיזים את כל הקיר.';
   }else if(k==='door'||k==='window'){const w=wallById(el.wallId);
     fl+=F.num('רוחב','width',el.width)+F.num('גובה','height',el.height!=null?el.height:(k==='door'?210:120));
     if(k==='window')fl+=F.num('גובה אדן','sillHeight',el.sillHeight!=null?el.sillHeight:90);
@@ -1389,19 +1482,21 @@ function refreshPanel(){
     }else{
       fl+=F.num('רוחב','fw',fmt(z.w))+F.num('עומק','fd',fmt(z.d));
       if(ck==='bed_queen'||ck==='bed_twin')fl+=F.seg('שידות','ns',[['none','ללא'],['left','שמאל'],['right','ימין'],['both','שתיים']],el.nightstands||'none');
+      if(RESIZE.has(ck))hint='גרור את הנקודות הירוקות כדי לשנות מידה; הצד שמול הנקודה נשאר במקום.';
     }
     const hw=hostOf(el);
     if(hw){fl+=F.info('צמוד לקיר',esc(hw.wallType||hw.id));ac=btn('side','⇄ לצד השני של הקיר')}
     else{fl+=F.num('סיבוב°','rotation',fmt(el.rotation||0));ac=btn('rotL','⟲ 90°')+btn('rotR','⟳ 90°')}
     ac+=btn('mirror','מראה')+btn('dup','שכפל')+btn('del','מחק','danger');
-    if(!hint)hint=hw?'הגב צמוד לפני ליבת הקיר. גרור לאורך הקיר או אל קיר אחר; הקש על מספר ירוק לקביעת המרחק.':
+    if(!hint)hint=hw?'הגב על קו 2.5 ס"מ מפני ליבת הקיר. גרור לאורך הקיר או אל קיר אחר; הקש על מספר ירוק לקביעת המרחק.':
       hostable(el)?'גרור את הפריט אל קיר כדי להצמיד אותו.':'הקש על מספר ירוק כדי לקבוע את המרחק מהקיר.';
   }else if(k==='line'){
     fl+=F.num('אורך','llen',fmt(dist(el.start,el.end)))+F.sw('צבע','lcolor',el.color||'#e53935')+F.seg('עובי','lw',[[1,'דק'],[2,'בינוני'],[4,'עבה']],el.width||2);
     ac=btn('del','מחק','danger');hint='האורך משתנה מנקודת ההתחלה. גרור קצה או גרור את הקו.';
   }else if(k==='polygon'){
     fl+=F.info('שטח',polyArea(el.points||[]).toFixed(2)+' מ"ר')+F.txt('שם','pname',el.name||'','למשל: סלון')+F.sw('צבע','pcolor',el.color||'#1e88e5');
-    ac=btn('del','מחק','danger');hint='גרור פינה כדי לשנות צורה, או גרור את האזור כדי להזיז.';
+    ac=(vtxSel()!=null&&(el.points||[]).length>3?btn('delVtx','מחק נקודה'):'')+btn('del','מחק','danger');
+    hint='גרור פינה כדי לשנות צורה, או גרור את האזור כדי להזיז. ה-+ באמצע צלע מוסיף נקודת שבירה; הקש על פינה ואז "מחק נקודה" כדי להסיר.';
   }
   h+='<div class="fields">'+fl+'</div><div class="acts">'+ac+'</div>'+(hint?'<div class="hint">'+hint+'</div>':'');
   pn.classList.add('show');pn.classList.toggle('mini',!!settings.panelMini);pn.classList.toggle('locked',!!settings.locked);
@@ -1437,6 +1532,7 @@ function refreshPanelValues(){const pn=$('#panel'),el=getSel();if(!el||!pn.class
   if(sel.kind==='line')set('llen',fmt(dist(el.start,el.end)));
   if(sel.kind==='polygon'){const i=pn.querySelector('.info');if(i)i.textContent=polyArea(el.points||[]).toFixed(2)+' מ"ר'}
   if(sel.kind==='furniture'&&catKey(el)==='kitchen_u'){const kp=kParams(el);set('fw',fmt(kp.W));set('kL',fmt(kp.L));set('kR',fmt(kp.R))}
+  if(sel.kind==='furniture'&&RESIZE.has(catKey(el))){const z=furnSize(el);set('fw',fmt(z.w));set('fd',fmt(z.d))}
 }
 function applyField(k,raw){
   const el=getSel();if(!el)return;
@@ -1491,6 +1587,7 @@ function panelAction(a){
   if(a==='del'){commit(()=>{const f=floor();if(k==='wall'){['doors','windows'].forEach(x=>{if(Array.isArray(f[x]))f[x]=f[x].filter(o=>String(o.wallId)!==String(el.id))});
       for(const o of furn())if(String(o.hostWallId)===String(el.id))delete o.hostWallId}
       f[ARR[k]]=f[ARR[k]].filter(e=>e!==el)});sel=null;refreshPanel();render();return}
+  if(a==='delVtx'){const i=vtxSel();if(i==null||el.points.length<=3)return;commit(()=>{el.points.splice(i,1)});selVtx=null;refreshPanel();render();return}
   if(a==='addDoor'||a==='addWin'){addOpening(a==='addDoor'?'door':'window',el,wg(el).L/2);return}
   if(a==='flip'){commit(()=>{const s={x:el.start.x,y:el.start.y};el.start.x=el.end.x;el.start.y=el.end.y;el.end.x=s.x;el.end.y=s.y;
       for(const x of openings())if(String(x.o.wallId)===String(el.id)){x.o.position=r8(1-x.o.position);if(x.kind==='door'){x.o.flipSide=!x.o.flipSide;x.o.swingDirection=(x.o.swingDirection||'left')==='left'?'right':'left'}}});return}
@@ -1609,7 +1706,7 @@ document.addEventListener('keydown',e=>{
   else if(m&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}
   else if(m&&e.key.toLowerCase()==='s'){e.preventDefault();savePlan()}
   else if(e.key==='Escape'){if(chain)endChain();else{sel=null;refreshPanel();render()}}
-  else if((e.key==='Delete'||e.key==='Backspace')&&sel&&!settings.locked){e.preventDefault();panelAction('del')}
+  else if((e.key==='Delete'||e.key==='Backspace')&&sel&&!settings.locked){e.preventDefault();panelAction(vtxSel()!=null?'delVtx':'del')}
   else if(e.key==='Enter'&&chain)endChain();
 });
 window.addEventListener('pagehide',saveNow);
@@ -1631,6 +1728,7 @@ window.PlanEditor={
   setWallLength:(id,L,fixed)=>{const w=wallById(id);if(!w)throw new Error('no wall '+id);commit(()=>setWallLength(w,L,fixed||'start'))},
   moveWall:(id,off)=>{const w=wallById(id);if(!w)throw new Error('no wall '+id);const G=wg(w);
     commit(()=>{const g=beginGeom();translateWall(g,g.walls.find(x=>x.w===w),{x:G.nx*off,y:G.ny*off})})},
+  spaceDims:()=>spaceDims().map(d=>({len:r2(d.len),a:{x:r2(d.a.x),y:r2(d.a.y)},b:{x:r2(d.b.x),y:r2(d.b.y)}})),
   opDist:id=>{const o=openings().find(x=>x.o.id===id);return o?opDist(o.o,wallById(o.o.wallId)):null},
   select:(kind,id)=>{sel={kind,id};refreshPanel();render()},
   tempDims:()=>{draw(ctx,view,cw,ch,dpr,false);return tempDims.map(t=>({value:t.value,x:t.L.x,y:t.L.y}))},
