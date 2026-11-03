@@ -958,8 +958,10 @@ function draw(c,V,W,H,DPR,print){
   }
   if(s&&sel.kind==='line'){const L=dist(s.start,s.end);if(L*S>30){const A=sp(s.start),B=sp(s.end);const G=wg({start:s.start,end:s.end});
     label(c,{x:(A.x+B.x)/2-G.nx*16,y:(A.y+B.y)/2-G.ny*16},Math.atan2(G.uy,G.ux),fmt(L),'#1565c0',13)}}
-  if(s&&sel.kind==='polygon'){const v=s.points||[];for(let i=0;i<v.length;i++){const a=v[i],bb=v[(i+1)%v.length],L=dist(a,bb);if(L*S<40)continue;
-    const A=sp(a),B=sp(bb),G=wg({start:a,end:bb});label(c,{x:(A.x+B.x)/2,y:(A.y+B.y)/2},Math.atan2(G.uy,G.ux),fmt(L),shade(s.color||'#1e88e5'),12)}}
+  // side lengths sit 16 px inside the area: the side's "+" handle (radius 7) owns the midpoint
+  if(s&&sel.kind==='polygon'){const v=s.points||[],C=sp(polyCentroid(v));for(let i=0;i<v.length;i++){const a=v[i],bb=v[(i+1)%v.length],L=dist(a,bb);if(L*S<40)continue;
+    const A=sp(a),B=sp(bb),G=wg({start:a,end:bb}),M={x:(A.x+B.x)/2,y:(A.y+B.y)/2},sg=((C.x-M.x)*G.nx+(C.y-M.y)*G.ny)>=0?1:-1;
+    label(c,{x:M.x+G.nx*16*sg,y:M.y+G.ny*16*sg},Math.atan2(G.uy,G.ux),fmt(L),shade(s.color||'#1e88e5'),12)}}
   // editable temporary dimensions
   if(s&&tool==='select'&&!settings.locked){
     const sideN=(a,bb)=>{if(sel.kind!=='door'&&sel.kind!=='window')return null;const w=wallById(s.wallId),G=wg(w);
